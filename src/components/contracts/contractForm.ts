@@ -11,6 +11,7 @@ export interface ContractFormState {
   paymentWeekday: string;
   defaultShift: WorkShift;
   hoursPerShift: string;
+  paymentPeriod: 'mensual' | 'quincenal';
   paymentDayOfMonth: string;
   workDaysPerMonthTarget: string;
   currentBalance: string;
@@ -31,6 +32,7 @@ export function createContractFormState(salary: Partial<SalaryProfile>): Contrac
     paymentWeekday: String(salary.paymentWeekday ?? 5),
     defaultShift: salary.defaultShift ?? 'diurno',
     hoursPerShift: String(salary.hoursPerShift ?? 8),
+    paymentPeriod: salary.paymentPeriod === 'quincenal' ? 'quincenal' : 'mensual',
     paymentDayOfMonth: String(salary.paymentDayOfMonth ?? 28),
     workDaysPerMonthTarget: String(salary.workDaysPerMonthTarget ?? 22),
     currentBalance: String(salary.currentBalance ?? 0),
@@ -62,7 +64,9 @@ export function parseContractForm(values: ContractFormState): { data?: Partial<S
       return { error: 'El salario mensual debe ser mayor que cero.' };
     }
 
-    const paymentDay = Number(values.paymentDayOfMonth);
+    const isQuincenal = values.paymentPeriod === 'quincenal';
+    // En quincenal se paga el 15 y el último día del mes; se guarda 30 como referencia.
+    const paymentDay = isQuincenal ? 30 : Number(values.paymentDayOfMonth);
     if (!Number.isInteger(paymentDay) || paymentDay < 1 || paymentDay > 31) {
       return { error: 'El día de pago debe estar entre 1 y 31.' };
     }
@@ -85,7 +89,7 @@ export function parseContractForm(values: ContractFormState): { data?: Partial<S
         paymentWeekday: 5,
         defaultShift,
         hoursPerShift,
-        paymentPeriod: 'mensual',
+        paymentPeriod: isQuincenal ? 'quincenal' : 'mensual',
         paymentDayOfMonth: paymentDay,
         workDaysPerMonthTarget: workDaysTarget,
         currentBalance: balance,

@@ -195,15 +195,34 @@ export const ContractFields: React.FC<Props> = ({
       {!isObra && (
         <div className={gridClass}>
           {field(
-            'Día de cobro (1 - 31)',
-            numberInput(values.paymentDayOfMonth, (value) => onChange({ paymentDayOfMonth: value }), {
-              min: '1',
-              max: '31',
-              step: '1',
-              required: true,
-            }),
-            <CalendarDays size={15} />
+            'Periodicidad de pago',
+            select(
+              values.paymentPeriod,
+              (value) => onChange({ paymentPeriod: value === 'quincenal' ? 'quincenal' : 'mensual' }),
+              [
+                { value: 'mensual', label: 'Mensual' },
+                { value: 'quincenal', label: 'Quincenal (15 y fin de mes)' },
+              ]
+            ),
+            <Banknote size={15} />
           )}
+          {values.paymentPeriod === 'quincenal'
+            ? field(
+              'Días de cobro',
+              <input type="text" value="15 y último día del mes" readOnly disabled className={inputClass} />,
+              <CalendarDays size={15} />,
+              'Cada pago es la mitad del salario.'
+            )
+            : field(
+              'Día de cobro (1 - 31)',
+              numberInput(values.paymentDayOfMonth, (value) => onChange({ paymentDayOfMonth: value }), {
+                min: '1',
+                max: '31',
+                step: '1',
+                required: true,
+              }),
+              <CalendarDays size={15} />
+            )}
           {field(
             'Días laborables al mes',
             numberInput(values.workDaysPerMonthTarget, (value) => onChange({ workDaysPerMonthTarget: value }), {

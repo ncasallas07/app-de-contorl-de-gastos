@@ -102,6 +102,18 @@ export function getWeekRange(base: Date = new Date()) {
   };
 }
 
+/** Fechas de pago quincenal de un mes: el 15 y el último día (a mediodía, hora local). */
+export function getQuincenalPaymentDates(year: number, monthIndex: number): Date[] {
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return [new Date(year, monthIndex, 15, 12), new Date(year, monthIndex, lastDay, 12)];
+}
+
+/** Cuántos pagos recibe la persona en un mes típico. */
+export function getPaymentsPerMonth(salary: SalaryProfile): number {
+  if (salary.contractType === 'obra_labor') return 52 / 12;
+  return salary.paymentPeriod === 'quincenal' ? 2 : 1;
+}
+
 export function getNextPaymentDate(salary: SalaryProfile, from: Date = new Date()): Date {
   const base = startOfDay(from);
 
@@ -111,6 +123,15 @@ export function getNextPaymentDate(salary: SalaryProfile, from: Date = new Date(
     const diff = (target - next.getDay() + 7) % 7;
     next.setDate(next.getDate() + diff);
     return next;
+  }
+
+  if (salary.paymentPeriod === 'quincenal') {
+    // Quincenal: se paga el día 15 y el último día de cada mes.
+    for (let monthOffset = 0; monthOffset < 2; monthOffset += 1) {
+      for (const date of getQuincenalPaymentDates(base.getFullYear(), base.getMonth() + monthOffset)) {
+        if (date >= base) return date;
+      }
+    }
   }
 
   const day = Math.max(1, Math.min(31, salary.paymentDayOfMonth));
@@ -156,6 +177,10 @@ export function getWeekdayLabel(weekday: number): string {
 export function getPaymentDescription(salary: SalaryProfile): string {
   if (salary.contractType === 'obra_labor') {
     return `Semanal · ${getWeekdayLabel(salary.paymentWeekday)}`;
+  }
+
+  if (salary.paymentPeriod === 'quincenal') {
+    return 'Quincenal · días 15 y último del mes';
   }
 
   return `Mensual · día ${salary.paymentDayOfMonth}`;
