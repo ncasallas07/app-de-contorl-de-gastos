@@ -41,6 +41,11 @@ Aplicación web responsiva creada con **React 19 + TypeScript + Vite** y basada 
 - **Consejos y Acciones Serias**:
   - Recomendaciones tajantes con niveles de severidad (*Urgente*, *Alta*, *Moderada*).
 
+### 6. 🤖 Agente Coach Financiero (autónomo)
+- Corre solo en el servidor de Supabase una vez al día, aunque nadie abra la app.
+- Capa 1, agente reactivo: vigila los vencimientos y avisa en la app y por correo.
+- Instalación, arquitectura y pruebas en [`supabase/functions/README.md`](supabase/functions/README.md).
+
 ---
 
 ## 🛠️ Tecnologías Utilizadas

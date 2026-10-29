@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "test": "deno test --allow-env tests/",
+    "check": "deno check agent-run/index.ts",
+    "lint": "deno lint"
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["no-import-prefix"]
+    }
+  }
+}
