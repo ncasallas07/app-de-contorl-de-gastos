@@ -104,6 +104,11 @@ alter table public.finance_settings
   add column if not exists hours_per_shift numeric(4, 1) not null default 8
     check (hours_per_shift between 0.5 and 24);
 
+-- Versión del estado financiero. Sube cada vez que la app o el agente
+-- guardan cambios; así ninguno de los dos pisa lo que el otro escribió.
+alter table public.finance_settings
+  add column if not exists state_version bigint not null default 0;
+
 alter table public.work_days
   add column if not exists shift text not null default 'diurno'
     check (shift in ('diurno', 'nocturno', 'mixto'));
@@ -190,23 +195,48 @@ create policy "work_days_own_rows"
 -- GUARDADO ATÓMICO DEL ESTADO FINANCIERO
 -- ============================================================
 
+-- Versión anterior (sin control de versión): se reemplaza.
+drop function if exists public.save_finance_state(jsonb, jsonb, jsonb, jsonb);
+
+-- p_expected_version: la versión que la app cargó. Si alguien (por ejemplo
+-- el agente) guardó después, se rechaza con FINSMART_CONFLICT para que la
+-- app recargue en vez de pisar esos cambios. Devuelve la nueva versión.
 create or replace function public.save_finance_state(
   p_salary jsonb,
   p_debts jsonb,
   p_expenses jsonb,
-  p_work_days jsonb
+  p_work_days jsonb,
+  p_expected_version bigint default null
 )
-returns void
+returns bigint
 language plpgsql
 security invoker
 set search_path = public
 as $$
 declare
   v_user_id uuid := auth.uid();
+  v_current bigint;
+  v_next bigint;
 begin
   if v_user_id is null then
     raise exception 'No autenticado' using errcode = '28000';
   end if;
+
+  -- Bloquea la fila para que dos guardados no se crucen.
+  select state_version into v_current
+  from public.finance_settings
+  where user_id = v_user_id
+  for update;
+
+  if p_expected_version is not null
+    and v_current is not null
+    and v_current <> p_expected_version then
+    raise exception 'FINSMART_CONFLICT: tus datos cambiaron (versión % y no %)',
+      v_current, p_expected_version
+      using errcode = '40001';
+  end if;
+
+  v_next := coalesce(v_current, 0) + 1;
 
   insert into public.finance_settings (
     user_id,
@@ -224,7 +254,8 @@ begin
     work_days_per_month_target,
     current_balance,
     currency,
-    strategy_mode
+    strategy_mode,
+    state_version
   )
   values (
     v_user_id,
@@ -254,7 +285,8 @@ begin
     case
       when p_salary ->> 'strategy_mode' = 'bola_de_nieve' then 'bola_de_nieve'
       else 'avalancha'
-    end
+    end,
+    v_next
   )
   on conflict (user_id) do update set
     contract_type = excluded.contract_type,
@@ -272,6 +304,7 @@ begin
     current_balance = excluded.current_balance,
     currency = excluded.currency,
     strategy_mode = excluded.strategy_mode,
+    state_version = excluded.state_version,
     updated_at = now();
 
   delete from public.expenses e
@@ -376,11 +409,13 @@ begin
     daily_earnings = excluded.daily_earnings,
     notes = excluded.notes,
     updated_at = now();
+
+  return v_next;
 end;
 $$;
 
-revoke all on function public.save_finance_state(jsonb, jsonb, jsonb, jsonb) from public;
-grant execute on function public.save_finance_state(jsonb, jsonb, jsonb, jsonb) to authenticated;
+revoke all on function public.save_finance_state(jsonb, jsonb, jsonb, jsonb, bigint) from public;
+grant execute on function public.save_finance_state(jsonb, jsonb, jsonb, jsonb, bigint) to authenticated;
 
 grant select, insert, update, delete on public.finance_settings to authenticated;
 grant select, insert, update, delete on public.expenses to authenticated;

@@ -8,7 +8,7 @@ Está construido por capas, de menor a mayor complejidad (Russell y Norvig):
 | Capa | Tipo de agente | Archivo | Estado |
 | --- | --- | --- | --- |
 | 1. Vigilante de vencimientos | Reactivo simple | `_shared/agents/watcher.ts` | Listo |
-| 2. Cierre de ciclo | Basado en modelo | `_shared/agents/cycle.ts` | Semana 2 |
+| 2. Cierre de ciclo | Basado en modelo | `_shared/agents/cycle.ts` | Listo |
 | 3. Planificador sin deudas | Basado en objetivos | `_shared/agents/planner.ts` | Semana 3 |
 | 4. Asesor de nómina | Basado en utilidad | `_shared/agents/payroll.ts` | Versión completa |
 | 5. Detector de gastos hormiga | Que aprende | `_shared/agents/antLearner.ts` | Versión completa |
@@ -19,16 +19,39 @@ Está construido por capas, de menor a mayor complejidad (Russell y Norvig):
 Supabase Cron (5:00 a. m. Bogotá) → public.run_finsmart_agent()
   └─ POST /functions/v1/agent-run  (x-agent-secret, leído de Vault)
        └─ orchestrator.ts: para cada usuario
-            1. percibe: lee sus deudas (y más datos en las siguientes capas)
-            2. decide: cada capa devuelve acciones
-            3. actúa: guarda en agent_actions y envía un correo con lo nuevo
-            4. registra la ejecución en agent_runs
+            1. percibe: contrato, balance, deudas, jornadas y su memoria (agent_state)
+            2. capa 2 (modelo): suma pagos y renueva cuotas → agent_apply_cycle (atómico)
+            3. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
+            4. actúa: guarda en agent_actions y envía un correo con lo urgente
+            5. registra la ejecución en agent_runs
 ```
+
+La capa 2 va antes que la 1 a propósito: primero el agente actualiza su
+modelo del mundo y luego las reglas reactivas actúan sobre ese estado.
 
 - **Capa 1 (vigilante):** reglas condición → acción. Avisa si una cuota
   pendiente vence en 3 días o menos, vence hoy o ya venció. No guarda memoria;
   la base de datos evita repetir la misma alerta (`dedupe_key` único), y si la
   situación empeora (de "próxima" a "hoy" o "vencida") llega un aviso nuevo.
+- **Capa 2 (cierre de ciclo):** guarda un modelo interno en `agent_state`: el
+  último día de pago que ya aplicó. Con eso:
+  - el día de pago suma la nómina al balance: mensual (salario completo),
+    quincenal (mitad del salario el 15 y el último día del mes) u obra o labor
+    (lo ganado en las jornadas registradas de los 7 días anteriores). Nunca
+    aplica dos veces el mismo pago y, si el cron estuvo apagado, se pone al
+    día con hasta 62 días hacia atrás;
+  - cuando pasa la fecha de una cuota marcada como pagada, la renueva: la
+    fecha avanza un mes y vuelve a quedar pendiente.
+  - La primera vez no suma pagos pasados: el balance que el usuario escribió es
+    el punto de partida.
+- **Sin pisarse con la app:** `finance_settings.state_version` sube con cada
+  guardado. La app guarda indicando la versión que cargó y el agente aplica sus
+  cambios con `agent_apply_cycle` solo si nadie guardó desde que leyó. Si hay
+  choque, la app recarga los datos y el agente lo reintenta al día siguiente.
+  Al volver a la pestaña, la app revisa la versión y recarga si el agente
+  cambió algo.
+- **Bandeja en la app:** `src/components/AgentInbox.tsx` muestra en el Resumen
+  las acciones sin leer, con su capa y prioridad.
 - **Fechas:** el servidor corre en UTC, así que "hoy" se calcula en la zona
   `America/Bogota` (`_shared/zone.ts`).
 - **Misma lógica que la app:** `_shared/finance/` es una copia generada de
@@ -56,6 +79,7 @@ supabase/
     _shared/
       orchestrator.ts       ejecuta las capas en orden
       agents/watcher.ts     capa 1
+      agents/cycle.ts       capa 2
       supabaseStore.ts      lectura y escritura en Postgres
       notify.ts             correos con Resend
       zone.ts               fechas en la zona de Bogotá
@@ -74,6 +98,8 @@ quieres correr Supabase completo en tu computador.
 
 1. **Base de datos.** En tu proyecto de Supabase, abre *SQL Editor* y ejecuta
    completos, en este orden: `supabase/schema.sql` y luego `supabase/agent.sql`.
+   Si actualizas desde una versión anterior, vuelve a ejecutar los dos: se
+   pueden ejecutar varias veces sin perder datos.
 
 2. **Vincular el proyecto** (el `project-ref` está en la URL del panel):
 
@@ -122,13 +148,17 @@ quieres correr Supabase completo en tu computador.
    select status_code, content from net._http_response order by created desc limit 1;
    ```
 
-   Respuesta esperada: `{"today":"2026-11-10","users":1,"newActions":1,"errors":[]}`.
+   Respuesta esperada: `{"today":"2026-11-10","users":1,"newActions":1,"balanceAdded":0,"errors":[]}`.
    Las alertas quedan en la tabla `agent_actions` y cada ejecución en `agent_runs`.
+
+   **Cuidado al simular fechas:** si simulas un día de pago futuro, la capa 2
+   suma ese pago de verdad y su memoria avanza hasta esa fecha. Para la demo usa
+   una cuenta de prueba, no la tuya real.
 
 ## Pruebas
 
 ```bash
-npm run agent:test     # 15 pruebas: reglas del vigilante, fechas y orquestador
+npm run agent:test     # 32 pruebas: vigilante, cierre de ciclo, fechas y orquestador
 npm run agent:check    # revisión de tipos de la función
 ```
 

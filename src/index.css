@@ -1473,6 +1473,94 @@ body.light-theme .vt-gauge .track {
   font-size: 9px;
 }
 
+/* ===== AGENT INBOX ===== */
+
+.vt-agent-inbox .vt-card-head {
+  margin-bottom: 12px;
+}
+
+.vt-agent-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vt-agent-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.vt-agent-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  color: var(--muted-strong);
+  background: var(--surface-3);
+  border-radius: 8px;
+}
+
+.vt-agent-item.danger .vt-agent-icon { color: var(--neg); background: var(--neg-bg); }
+.vt-agent-item.warn .vt-agent-icon { color: var(--warn); background: var(--warn-bg); }
+.vt-agent-item.ok .vt-agent-icon { color: var(--pos); background: var(--pos-bg); }
+
+.vt-agent-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.vt-agent-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vt-agent-top strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.vt-agent-body p {
+  margin-top: 3px;
+  color: var(--muted-strong);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.vt-agent-body small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.vt-agent-item .vt-icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+@media (max-width: 520px) {
+  .vt-agent-inbox .vt-card-head {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .vt-agent-top {
+    flex-wrap: wrap;
+  }
+}
+
 /* ===== CALENDAR ===== */
 
 .vt-cal-layout {

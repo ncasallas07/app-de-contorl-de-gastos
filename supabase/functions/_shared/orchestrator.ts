@@ -1,22 +1,45 @@
-// Orquestador del agente: ejecuta las capas en orden para un usuario.
+// Orquestador del agente: ejecuta las capas para un usuario.
 //
-//   1. Reactivo (vigilante)        ← semana 1
-//   2. Basado en modelo (ciclo)    ← semana 2
+//   Percibir → 2. Basado en modelo (ciclo) → 1. Reactivo (vigilante) → Actuar
 //   3. Objetivos (planificador)    ← semana 3
 //   4. Utilidad (asesor)           ← versión completa
 //   5. Aprendizaje (hormiga)       ← versión completa
 //
+// El ciclo va antes que el vigilante: primero el agente actualiza su modelo
+// del mundo (pagos, cuotas renovadas) y luego las reglas reactivas actúan
+// sobre ese estado ya actualizado.
+//
 // No depende de Supabase: recibe un `AgentStore` (base de datos) y un
 // `EmailSender`. Así se puede probar con datos falsos (ver tests/).
 
-import type { DebtRecord } from './finance/finance.ts';
+import type { DebtRecord, SalaryProfile, WorkDayRecord } from './finance/finance.ts';
 import type { AgentAction, StoredAction } from './agentTypes.ts';
 import { runWatcher } from './agents/watcher.ts';
+import { applyDebtUpdates, type DebtUpdate, runCycle } from './agents/cycle.ts';
 import { buildAlertEmail, type EmailSender } from './notify.ts';
+
+/** Lo que el agente percibe de un usuario. */
+export interface UserState {
+  salary: SalaryProfile;
+  debts: DebtRecord[];
+  workDays: WorkDayRecord[];
+  stateVersion: number;
+  lastPaymentApplied: string | null;
+}
+
+export interface CycleCommit {
+  expectedVersion: number;
+  balanceDelta: number;
+  debtUpdates: DebtUpdate[];
+  lastPaymentApplied: string;
+  runDate: string;
+}
 
 export interface AgentStore {
   listUserIds(onlyUserId?: string): Promise<string[]>;
-  loadDebts(userId: string): Promise<DebtRecord[]>;
+  loadUserState(userId: string): Promise<UserState>;
+  /** Aplica el ciclo de forma atómica. Devuelve la nueva versión, o null si hubo conflicto. */
+  applyCycle(userId: string, commit: CycleCommit): Promise<number | null>;
   /** Guarda las acciones y devuelve SOLO las nuevas (las repetidas se ignoran). */
   saveActions(userId: string, actions: AgentAction[]): Promise<StoredAction[]>;
   markEmailed(actionIds: string[]): Promise<void>;
@@ -38,6 +61,7 @@ export interface UserRunResult {
   userId: string;
   status: 'ok' | 'error';
   newActions: number;
+  balanceDelta: number;
   emailSent: boolean;
   error?: string;
 }
@@ -51,11 +75,41 @@ export async function runAgentForUser(
   const layers: string[] = [];
   try {
     // Percepción.
-    const debts = await store.loadDebts(userId);
+    const state = await store.loadUserState(userId);
+    let debts = state.debts;
+    const decided: AgentAction[] = [];
+    let balanceDelta = 0;
 
-    // Capa 1: reactivo simple.
+    // Capa 2: basado en modelo.
+    const cycle = runCycle({
+      salary: state.salary,
+      debts,
+      workDays: state.workDays,
+      todayIso,
+      lastPaymentApplied: state.lastPaymentApplied,
+    });
+    const applied = await store.applyCycle(userId, {
+      expectedVersion: state.stateVersion,
+      balanceDelta: cycle.balanceDelta,
+      debtUpdates: cycle.debtUpdates,
+      lastPaymentApplied: cycle.lastPaymentApplied,
+      runDate: todayIso,
+    });
+
+    if (applied === null) {
+      // La app guardó mientras el agente pensaba: no se pisa nada.
+      // Como la memoria no avanzó, mañana lo vuelve a intentar.
+      layers.push('ciclo:conflicto');
+    } else {
+      layers.push('ciclo');
+      debts = applyDebtUpdates(debts, cycle.debtUpdates);
+      balanceDelta = cycle.balanceDelta;
+      decided.push(...cycle.actions);
+    }
+
+    // Capa 1: reactivo simple, sobre el estado ya actualizado.
     layers.push('vigilante');
-    const decided = runWatcher(debts, todayIso);
+    decided.push(...runWatcher(debts, todayIso));
 
     // Actuar: registrar en la app.
     const created = await store.saveActions(userId, decided);
@@ -83,7 +137,7 @@ export async function runAgentForUser(
       status: 'ok',
     });
 
-    return { userId, status: 'ok', newActions: created.length, emailSent };
+    return { userId, status: 'ok', newActions: created.length, balanceDelta, emailSent };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Un error con un usuario no detiene a los demás.
@@ -96,7 +150,7 @@ export async function runAgentForUser(
       status: 'error',
       error: message,
     }).catch(() => undefined);
-    return { userId, status: 'error', newActions: 0, emailSent: false, error: message };
+    return { userId, status: 'error', newActions: 0, balanceDelta: 0, emailSent: false, error: message };
   }
 }
 

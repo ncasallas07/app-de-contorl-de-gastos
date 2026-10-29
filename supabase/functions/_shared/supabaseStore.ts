@@ -2,9 +2,9 @@
 // Usa el cliente con service_role: solo existe dentro de la Edge Function.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import type { DebtRecord } from './finance/finance.ts';
+import type { DebtRecord, SalaryProfile, WorkDayRecord } from './finance/finance.ts';
 import type { StoredAction } from './agentTypes.ts';
-import type { AgentStore, RunLog } from './orchestrator.ts';
+import type { AgentStore, RunLog, UserState } from './orchestrator.ts';
 
 interface DebtRow {
   id: string;
@@ -37,6 +37,60 @@ export function mapDebtRow(row: DebtRow): DebtRecord {
   };
 }
 
+interface SettingsRow {
+  contract_type: SalaryProfile['contractType'];
+  pay_mode: SalaryProfile['payMode'];
+  daily_rate: number | string;
+  hourly_rate: number | string;
+  work_days_per_week: number;
+  payment_weekday: number;
+  default_shift: SalaryProfile['defaultShift'];
+  hours_per_shift: number | string;
+  monthly_salary: number | string;
+  payment_period: SalaryProfile['paymentPeriod'];
+  payment_day_of_month: number;
+  work_days_per_month_target: number;
+  current_balance: number | string;
+  state_version: number | string;
+}
+
+interface WorkDayRow {
+  date: string;
+  type: WorkDayRecord['type'];
+  shift: WorkDayRecord['shift'] | null;
+  hours_worked: number | string | null;
+  daily_earnings: number | string | null;
+}
+
+export function mapSettingsRow(row: SettingsRow): SalaryProfile {
+  return {
+    contractType: row.contract_type,
+    payMode: row.pay_mode,
+    monthlySalary: num(row.monthly_salary),
+    dailyRate: num(row.daily_rate),
+    hourlyRate: num(row.hourly_rate),
+    workDaysPerWeek: row.work_days_per_week,
+    paymentWeekday: row.payment_weekday,
+    defaultShift: row.default_shift,
+    hoursPerShift: num(row.hours_per_shift),
+    paymentPeriod: row.payment_period,
+    paymentDayOfMonth: row.payment_day_of_month,
+    workDaysPerMonthTarget: row.work_days_per_month_target,
+    currentBalance: num(row.current_balance),
+    currency: 'COP',
+  };
+}
+
+export function mapWorkDayRow(row: WorkDayRow): WorkDayRecord {
+  return {
+    date: row.date,
+    type: row.type,
+    shift: row.shift ?? undefined,
+    hoursWorked: row.hours_worked === null ? undefined : num(row.hours_worked),
+    dailyEarnings: row.daily_earnings === null ? undefined : num(row.daily_earnings),
+  };
+}
+
 export function createSupabaseStore(client: SupabaseClient): AgentStore {
   return {
     async listUserIds(onlyUserId) {
@@ -47,13 +101,56 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
       return (data ?? []).map((row: { user_id: string }) => row.user_id);
     },
 
-    async loadDebts(userId) {
-      const { data, error } = await client
-        .from('debts')
-        .select('id, title, category, total_amount, monthly_payment, annual_interest_rate, due_date, payment_status, minimum_payment_only, notes')
-        .eq('user_id', userId);
-      if (error) throw new Error(`No se pudieron leer las deudas: ${error.message}`);
-      return (data ?? []).map((row) => mapDebtRow(row as DebtRow));
+    async loadUserState(userId): Promise<UserState> {
+      const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+      const [settings, debts, workDays, agentState] = await Promise.all([
+        client.from('finance_settings')
+          .select('contract_type, pay_mode, daily_rate, hourly_rate, work_days_per_week, payment_weekday, default_shift, hours_per_shift, monthly_salary, payment_period, payment_day_of_month, work_days_per_month_target, current_balance, state_version')
+          .eq('user_id', userId)
+          .single(),
+        client.from('debts')
+          .select('id, title, category, total_amount, monthly_payment, annual_interest_rate, due_date, payment_status, minimum_payment_only, notes')
+          .eq('user_id', userId),
+        // Las jornadas solo importan para pagos recientes (obra o labor).
+        client.from('work_days')
+          .select('date, type, shift, hours_worked, daily_earnings')
+          .eq('user_id', userId)
+          .gte('date', since),
+        client.from('agent_state')
+          .select('last_payment_applied')
+          .eq('user_id', userId)
+          .maybeSingle(),
+      ]);
+
+      const failed = [settings, debts, workDays, agentState].find((result) => result.error);
+      if (failed?.error) throw new Error(`No se pudieron leer los datos: ${failed.error.message}`);
+
+      const settingsRow = settings.data as SettingsRow;
+      return {
+        salary: mapSettingsRow(settingsRow),
+        debts: (debts.data ?? []).map((row) => mapDebtRow(row as DebtRow)),
+        workDays: (workDays.data ?? []).map((row) => mapWorkDayRow(row as WorkDayRow)),
+        stateVersion: num(settingsRow.state_version),
+        lastPaymentApplied: (agentState.data as { last_payment_applied: string | null } | null)
+          ?.last_payment_applied ?? null,
+      };
+    },
+
+    async applyCycle(userId, commit) {
+      const { data, error } = await client.rpc('agent_apply_cycle', {
+        p_user_id: userId,
+        p_expected_version: commit.expectedVersion,
+        p_balance_delta: commit.balanceDelta,
+        p_debt_updates: commit.debtUpdates.map((update) => ({
+          id: update.id,
+          due_date: update.dueDate,
+          payment_status: update.paymentStatus,
+        })),
+        p_last_payment_applied: commit.lastPaymentApplied,
+        p_run_date: commit.runDate,
+      });
+      if (error) throw new Error(`No se pudo aplicar el ciclo: ${error.message}`);
+      return data === null ? null : num(data as number | string);
     },
 
     async saveActions(userId, actions) {

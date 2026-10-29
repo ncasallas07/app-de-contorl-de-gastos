@@ -21,6 +21,22 @@ export interface FinanceSnapshot {
   strategyMode: StrategyMethod;
 }
 
+/** Estado cargado de la nube junto con su versión (ver state_version en schema.sql). */
+export interface LoadedFinanceState extends FinanceSnapshot {
+  version: number;
+}
+
+/**
+ * Otro guardado (por ejemplo, el agente coach financiero) cambió los datos
+ * después de que la app los cargó. La app debe recargar en vez de pisarlos.
+ */
+export class FinanceConflictError extends Error {
+  constructor() {
+    super('Tus datos se actualizaron desde otro lugar (por ejemplo, el agente). Los recargamos.');
+    this.name = 'FinanceConflictError';
+  }
+}
+
 interface SettingsRow {
   contract_type: ContractType;
   pay_mode: PayMode;
@@ -37,6 +53,7 @@ interface SettingsRow {
   current_balance: number;
   currency: SalaryProfile['currency'];
   strategy_mode: StrategyMethod;
+  state_version: number | string;
 }
 
 interface ExpenseRow {
@@ -95,13 +112,13 @@ function friendlyDatabaseError(message: string, code?: string): Error {
   return new Error(message);
 }
 
-export async function loadFinanceState(userId: string): Promise<FinanceSnapshot | null> {
+export async function loadFinanceState(userId: string): Promise<LoadedFinanceState | null> {
   const client = requireClient();
 
   const [settingsResult, expensesResult, debtsResult, workDaysResult] = await Promise.all([
     client
       .from('finance_settings')
-      .select('contract_type,pay_mode,daily_rate,hourly_rate,work_days_per_week,payment_weekday,default_shift,hours_per_shift,monthly_salary,payment_period,payment_day_of_month,work_days_per_month_target,current_balance,currency,strategy_mode')
+      .select('contract_type,pay_mode,daily_rate,hourly_rate,work_days_per_week,payment_weekday,default_shift,hours_per_shift,monthly_salary,payment_period,payment_day_of_month,work_days_per_month_target,current_balance,currency,strategy_mode,state_version')
       .eq('user_id', userId)
       .maybeSingle<SettingsRow>(),
     client
@@ -183,13 +200,33 @@ export async function loadFinanceState(userId: string): Promise<FinanceSnapshot 
     expenses,
     workDays,
     strategyMode: settings.strategy_mode,
+    version: Number(settings.state_version ?? 0),
   };
 }
 
-export async function saveFinanceState(snapshot: FinanceSnapshot): Promise<void> {
+/** Versión actual en la nube, para saber si hay que recargar (null si aún no hay datos). */
+export async function fetchStateVersion(userId: string): Promise<number | null> {
+  const client = requireClient();
+  const { data, error } = await client
+    .from('finance_settings')
+    .select('state_version')
+    .eq('user_id', userId)
+    .maybeSingle<{ state_version: number | string }>();
+  if (error) throw friendlyDatabaseError(error.message, error.code);
+  return data ? Number(data.state_version) : null;
+}
+
+/**
+ * Guarda todo el estado. Con `expectedVersion` el servidor rechaza el guardado
+ * si alguien más guardó después (FinanceConflictError). Devuelve la nueva versión.
+ */
+export async function saveFinanceState(
+  snapshot: FinanceSnapshot,
+  expectedVersion: number | null = null
+): Promise<number> {
   const client = requireClient();
 
-  const { error } = await client.rpc('save_finance_state', {
+  const { data, error } = await client.rpc('save_finance_state', {
     p_salary: {
       contract_type: snapshot.salary.contractType,
       pay_mode: snapshot.salary.payMode,
@@ -237,7 +274,12 @@ export async function saveFinanceState(snapshot: FinanceSnapshot): Promise<void>
       daily_earnings: workDay.dailyEarnings ?? null,
       notes: workDay.notes ?? null,
     })),
+    p_expected_version: expectedVersion,
   });
 
-  if (error) throw friendlyDatabaseError(error.message, error.code);
+  if (error) {
+    if (error.message.includes('FINSMART_CONFLICT')) throw new FinanceConflictError();
+    throw friendlyDatabaseError(error.message, error.code);
+  }
+  return Number(data ?? 0);
 }

@@ -85,6 +85,7 @@ Deno.serve(async (request) => {
       today,
       users: results.length,
       newActions: results.reduce((sum, result) => sum + result.newActions, 0),
+      balanceAdded: results.reduce((sum, result) => sum + result.balanceDelta, 0),
       errors: results.filter((result) => result.status === 'error'),
     });
   } catch (error) {

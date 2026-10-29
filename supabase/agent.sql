@@ -184,6 +184,77 @@ grant update (read_at) on public.agent_actions to authenticated;
 grant select, insert on public.agent_feedback to authenticated;
 
 -- ============================================================
+-- CAPA 2: APLICAR EL CIERRE DE CICLO DE FORMA ATÓMICA
+-- El agente envía lo que decidió (cuánto sumar al balance y qué cuotas
+-- renovar). Solo se aplica si nadie guardó desde que el agente leyó los
+-- datos (p_expected_version); si no, devuelve null y lo reintenta mañana.
+-- ============================================================
+
+create or replace function public.agent_apply_cycle(
+  p_user_id uuid,
+  p_expected_version bigint,
+  p_balance_delta numeric,
+  p_debt_updates jsonb,
+  p_last_payment_applied date,
+  p_run_date date
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_current bigint;
+  v_next bigint;
+  v_changes boolean :=
+    coalesce(p_balance_delta, 0) <> 0
+    or jsonb_array_length(coalesce(p_debt_updates, '[]'::jsonb)) > 0;
+begin
+  select state_version into v_current
+  from public.finance_settings
+  where user_id = p_user_id
+  for update;
+
+  if v_current is null or v_current <> p_expected_version then
+    return null;
+  end if;
+
+  v_next := case when v_changes then v_current + 1 else v_current end;
+
+  if v_changes then
+    update public.finance_settings
+    set current_balance = current_balance + coalesce(p_balance_delta, 0),
+        state_version = v_next,
+        updated_at = now()
+    where user_id = p_user_id;
+
+    update public.debts d
+    set due_date = x.due_date,
+        payment_status = x.payment_status,
+        updated_at = now()
+    from jsonb_to_recordset(coalesce(p_debt_updates, '[]'::jsonb))
+      as x(id text, due_date date, payment_status text)
+    where d.user_id = p_user_id
+      and d.id = x.id
+      and x.payment_status in ('pendiente', 'pagado_mes', 'liquidada');
+  end if;
+
+  insert into public.agent_state (user_id, last_run_date, last_payment_applied)
+  values (p_user_id, p_run_date, p_last_payment_applied)
+  on conflict (user_id) do update set
+    last_run_date = excluded.last_run_date,
+    last_payment_applied = excluded.last_payment_applied;
+
+  return v_next;
+end;
+$$;
+
+revoke all on function public.agent_apply_cycle(uuid, bigint, numeric, jsonb, date, date)
+  from public, anon, authenticated;
+grant execute on function public.agent_apply_cycle(uuid, bigint, numeric, jsonb, date, date)
+  to service_role;
+
+-- ============================================================
 -- EJECUCIÓN DIARIA
 -- Está en supabase/agent_cron.sql (solo funciona en Supabase, porque usa
 -- pg_cron, pg_net y Vault). Ejecútalo después de desplegar agent-run.

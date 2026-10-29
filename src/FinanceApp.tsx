@@ -1,11 +1,17 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { CheckCircle2, CloudOff, Loader2 } from 'lucide-react';
 import { CloudSyncStatus, CurrencyCode, DebtRecord, ExpenseRecord, SalaryProfile, StrategyMethod, WorkDayRecord, WorkDayType, WorkShift } from './types/finance';
 import { AiAppActions, AiFinanceContext } from './types/ai';
 import { storageService } from './services/storageService';
 import { strategyEngine } from './services/strategyEngine';
-import { FinanceSnapshot, loadFinanceState, saveFinanceState } from './services/financeRepository';
+import {
+  FinanceConflictError,
+  FinanceSnapshot,
+  fetchStateVersion,
+  loadFinanceState,
+  saveFinanceState,
+} from './services/financeRepository';
 import { formatCOP } from './utils/money';
 import { createId } from './utils/id';
 import { daysUntil, getToday, parseLocalDate, startOfDay, toIsoDate } from './utils/date';
@@ -27,10 +33,20 @@ import { UserSettingsModal } from './components/modals/UserSettingsModal';
 import { OnboardingScreen, type OnboardingData } from './components/onboarding/OnboardingScreen';
 import { AiAssistantView } from './components/AiAssistantView';
 import { AiChatDock } from './components/AiChatDock';
+import { AgentInbox } from './components/AgentInbox';
 
 const LEGACY_SEED_DEBT_IDS = new Set(['debt-1', 'debt-2', 'debt-3', 'debt-4']);
 const LEGACY_SEED_EXPENSE_IDS = new Set([
   'exp-1', 'exp-2', 'exp-3', 'exp-4', 'exp-5', 'exp-6', 'exp-7', 'exp-8', 'exp-9',
+]);
+
+/** Huella del estado para saber si hay cambios sin guardar. */
+const snapshotKey = (snapshot: FinanceSnapshot) => JSON.stringify([
+  snapshot.salary,
+  snapshot.debts,
+  snapshot.expenses,
+  snapshot.workDays,
+  snapshot.strategyMode,
 ]);
 
 function isLegacySeedState(snapshot: FinanceSnapshot): boolean {
@@ -111,6 +127,12 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [hydrationAttempt, setHydrationAttempt] = useState(0);
 
+  // Control de versión con la nube: el agente también escribe el balance y
+  // las deudas, así que la app guarda indicando qué versión cargó.
+  const versionRef = useRef<number | null>(null);
+  const lastSyncedRef = useRef('');
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+
   const changeTab = (tab: TabType) => {
     setActiveTab(tab);
     window.scrollTo(0, 0);
@@ -143,7 +165,10 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
         const cloudState = await loadFinanceState(userId);
         if (cancelled) return;
 
+        versionRef.current = cloudState?.version ?? null;
+
         if (cloudState && cloudState.salary.monthlySalary > 0 && !isLegacySeedState(cloudState)) {
+          lastSyncedRef.current = snapshotKey(cloudState);
           setSalary(cloudState.salary);
           setDebts(cloudState.debts);
           setExpenses(cloudState.expenses);
@@ -180,17 +205,47 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
     [salary, debts, expenses, workDays, strategyMode]
   );
 
-  const persist = useCallback(async () => {
-    setCloudStatus('saving');
-    try {
-      await saveFinanceState(snapshot);
-      setCloudStatus('synced');
-      setCloudError(null);
-    } catch (error) {
-      setCloudStatus('error');
-      setCloudError(error instanceof Error ? error.message : 'No se pudieron guardar tus datos.');
-    }
-  }, [snapshot]);
+  const snapshotRef = useRef(snapshot);
+  useEffect(() => { snapshotRef.current = snapshot; }, [snapshot]);
+
+  /** Vuelve a cargar los datos de la nube sin sacar al usuario de la pantalla. */
+  const reloadFromCloud = useCallback(() => {
+    setCloudStatus('loading');
+    setHydrationAttempt((attempt) => attempt + 1);
+  }, []);
+
+  const persist = useCallback(() => {
+    const current = snapshot;
+    const key = snapshotKey(current);
+
+    const run = async () => {
+      // Nada nuevo que guardar (por ejemplo, justo después de cargar).
+      if (key === lastSyncedRef.current) {
+        setCloudStatus('synced');
+        return;
+      }
+
+      setCloudStatus('saving');
+      try {
+        versionRef.current = await saveFinanceState(current, versionRef.current);
+        lastSyncedRef.current = key;
+        setCloudStatus('synced');
+        setCloudError(null);
+      } catch (error) {
+        if (error instanceof FinanceConflictError) {
+          showToast(error.message);
+          reloadFromCloud();
+          return;
+        }
+        setCloudStatus('error');
+        setCloudError(error instanceof Error ? error.message : 'No se pudieron guardar tus datos.');
+      }
+    };
+
+    // Un guardado a la vez: cada uno usa la versión que dejó el anterior.
+    saveChainRef.current = saveChainRef.current.then(run, run);
+    return saveChainRef.current;
+  }, [snapshot, reloadFromCloud]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -201,6 +256,29 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
 
     return () => window.clearTimeout(timer);
   }, [hydrated, persist]);
+
+  // Al volver a la pestaña: si el agente cambió algo y no hay cambios locales
+  // pendientes, se recargan los datos para mostrar el balance actualizado.
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const onVisible = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (snapshotKey(snapshotRef.current) !== lastSyncedRef.current) return;
+      try {
+        const remote = await fetchStateVersion(userId);
+        if (remote !== null && versionRef.current !== null && remote !== versionRef.current) {
+          showToast('Tu agente actualizó tus datos.');
+          reloadFromCloud();
+        }
+      } catch {
+        // Sin conexión: se revisará la próxima vez.
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [hydrated, userId, reloadFromCloud]);
 
   const retryHydration = () => {
     setCloudError(null);
@@ -419,7 +497,8 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
       strategyMode: 'avalancha',
     };
 
-    await saveFinanceState(nextSnapshot);
+    versionRef.current = await saveFinanceState(nextSnapshot, null);
+    lastSyncedRef.current = snapshotKey(nextSnapshot);
     setSalary(nextSalary);
     setDebts([]);
     setExpenses([]);
@@ -641,6 +720,7 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
                   onGoToDebts={() => changeTab('debts')}
                 />
               )}
+              <AgentInbox refreshKey={hydrationAttempt} />
               <DebtUrgencyAlert
                 debts={debts}
                 onPayDebt={handlePayInstallment}
