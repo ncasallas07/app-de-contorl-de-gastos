@@ -184,33 +184,7 @@ grant update (read_at) on public.agent_actions to authenticated;
 grant select, insert on public.agent_feedback to authenticated;
 
 -- ============================================================
--- EJECUCIÓN DIARIA (Supabase Cron)
--- Paso aparte: ejecutar SOLO después de desplegar la función
--- y de definir el secreto AGENT_CRON_SECRET (ver README del agente).
--- Reemplaza los dos valores entre <...> en tu SQL Editor; no los guardes
--- en el repositorio.
+-- EJECUCIÓN DIARIA
+-- Está en supabase/agent_cron.sql (solo funciona en Supabase, porque usa
+-- pg_cron, pg_net y Vault). Ejecútalo después de desplegar agent-run.
 -- ============================================================
---
--- create extension if not exists pg_cron;
--- create extension if not exists pg_net;
---
--- select vault.create_secret('https://<TU-PROYECTO>.supabase.co', 'project_url');
--- select vault.create_secret('<EL MISMO AGENT_CRON_SECRET>', 'agent_cron_secret');
---
--- -- Todos los días a las 10:00 UTC = 5:00 a. m. en Bogotá.
--- select cron.schedule(
---   'finsmart-agent-diario',
---   '0 10 * * *',
---   $$
---   select net.http_post(
---     url := (select decrypted_secret from vault.decrypted_secrets where name = 'project_url')
---       || '/functions/v1/agent-run',
---     headers := jsonb_build_object(
---       'Content-Type', 'application/json',
---       'x-agent-secret',
---       (select decrypted_secret from vault.decrypted_secrets where name = 'agent_cron_secret')
---     ),
---     body := '{}'::jsonb
---   );
---   $$
--- );

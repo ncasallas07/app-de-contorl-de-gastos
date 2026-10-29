@@ -16,8 +16,8 @@ Está construido por capas, de menor a mayor complejidad (Russell y Norvig):
 ## Cómo funciona
 
 ```
-Supabase Cron (5:00 a. m. Bogotá)
-  └─ POST /functions/v1/agent-run  (encabezado x-agent-secret)
+Supabase Cron (5:00 a. m. Bogotá) → public.run_finsmart_agent()
+  └─ POST /functions/v1/agent-run  (x-agent-secret, leído de Vault)
        └─ orchestrator.ts: para cada usuario
             1. percibe: lee sus deudas (y más datos en las siguientes capas)
             2. decide: cada capa devuelve acciones
@@ -48,7 +48,8 @@ Supabase Cron (5:00 a. m. Bogotá)
 
 ```
 supabase/
-  agent.sql                 tablas del agente, seguridad (RLS) y cron
+  agent.sql                 tablas del agente y seguridad (RLS)
+  agent_cron.sql            secreto en Vault y ejecución diaria
   functions/
     deno.json               tareas de Deno (test, check, lint)
     agent-run/index.ts      punto de entrada (Edge Function)
@@ -81,44 +82,48 @@ quieres correr Supabase completo en tu computador.
    npx supabase link --project-ref <TU-PROJECT-REF>
    ```
 
-3. **Secretos de la función.** Inventa un secreto largo para el cron y, si
-   quieres correos, crea una clave en [Resend](https://resend.com):
+3. **Correos (opcional).** Si quieres que el agente envíe correos, crea una
+   clave en [Resend](https://resend.com) y guárdala como secreto:
 
    ```bash
-   npx supabase secrets set AGENT_CRON_SECRET=<secreto-largo-inventado>
-   npx supabase secrets set RESEND_API_KEY=<clave-de-resend>   # opcional
+   npx supabase secrets set RESEND_API_KEY=<clave-de-resend>
    ```
 
    Sin dominio propio, Resend solo entrega correos a la dirección con la que
-   creaste tu cuenta de Resend. Para la demo es suficiente.
+   creaste tu cuenta de Resend. Para la demo es suficiente. Sin esta clave el
+   agente funciona igual: las alertas quedan en la app.
    `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` ya existen dentro de la
    función; nunca los pongas en el código ni en variables `VITE_*`.
 
-4. **Desplegar:**
+4. **Desplegar** (sin Docker):
 
    ```bash
-   npx supabase functions deploy agent-run --no-verify-jwt
+   npx supabase functions deploy agent-run --no-verify-jwt --use-api
    ```
 
    `--no-verify-jwt` es necesario porque el cron no inicia sesión como usuario;
    la función se protege con el encabezado `x-agent-secret`.
 
-5. **Probar a mano** (puedes simular otra fecha con `today`):
+5. **Ejecución diaria.** Abre `supabase/agent_cron.sql`, cambia
+   `<TU-PROJECT-REF>` por el id de tu proyecto y ejecútalo completo en el SQL
+   Editor. Ese script:
+   - genera al azar el secreto que protege a `agent-run` y lo guarda en
+     Supabase Vault (nadie tiene que copiarlo ni escribirlo);
+   - crea `public.run_finsmart_agent()` para disparar el agente;
+   - programa el agente todos los días a las 5:00 a. m. (hora de Bogotá).
 
-   ```bash
-   curl -X POST "https://<TU-PROJECT-REF>.supabase.co/functions/v1/agent-run" \
-     -H "Content-Type: application/json" \
-     -H "x-agent-secret: <secreto-largo-inventado>" \
-     -d '{"today": "2026-11-10"}'
+6. **Probar a mano** (en el SQL Editor; sirve para la demo):
+
+   ```sql
+   select public.run_finsmart_agent();               -- como si fuera hoy
+   select public.run_finsmart_agent('2026-11-10');   -- simular otra fecha
+
+   -- unos segundos después, la respuesta del agente:
+   select status_code, content from net._http_response order by created desc limit 1;
    ```
 
    Respuesta esperada: `{"today":"2026-11-10","users":1,"newActions":1,"errors":[]}`.
    Las alertas quedan en la tabla `agent_actions` y cada ejecución en `agent_runs`.
-
-6. **Programar la ejecución diaria.** Al final de `supabase/agent.sql` está el
-   bloque de Supabase Cron comentado. Quita los `--`, reemplaza los dos valores
-   entre `<...>` y ejecútalo en el SQL Editor (no guardes esos valores en el
-   repositorio).
 
 ## Pruebas
 

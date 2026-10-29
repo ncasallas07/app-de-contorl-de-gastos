@@ -1,14 +1,15 @@
 // Edge Function `agent-run`: punto de entrada del agente coach financiero.
 //
-// La llama Supabase Cron una vez al día (ver supabase/agent.sql) y también
-// se puede llamar a mano para la demo. Está protegida con el encabezado
-// `x-agent-secret`, que debe coincidir con el secreto AGENT_CRON_SECRET.
+// La llama Supabase Cron una vez al día (ver supabase/agent_cron.sql) y
+// también se puede disparar a mano con `select public.run_finsmart_agent();`.
+// Está protegida con el encabezado `x-agent-secret`, que debe coincidir con
+// el secreto guardado en Supabase Vault.
 //
 // Cuerpo opcional (JSON):
 //   { "userId": "<uuid>" }        ejecutar solo para un usuario
 //   { "today": "2026-11-15" }     simular otra fecha (demo y pruebas)
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { runAgent } from '../_shared/orchestrator.ts';
 import { createSupabaseStore } from '../_shared/supabaseStore.ts';
 import { createResendSender } from '../_shared/notify.ts';
@@ -31,14 +32,33 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * El secreto vive en Supabase Vault (lo crea supabase/agent_cron.sql) y se
+ * verifica en la base de datos. Opcionalmente también se acepta el secreto
+ * de entorno AGENT_CRON_SECRET.
+ */
+async function isAuthorized(provided: string, client: SupabaseClient): Promise<boolean> {
+  if (provided.length < 32) return false;
+
+  const envSecret = Deno.env.get('AGENT_CRON_SECRET');
+  if (envSecret && safeEqual(provided, envSecret)) return true;
+
+  const { data, error } = await client.rpc('agent_check_secret', { p_secret: provided });
+  return !error && data === true;
+}
+
+const UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (request) => {
   if (request.method !== 'POST') return json({ error: 'Usa POST' }, 405);
 
-  const secret = Deno.env.get('AGENT_CRON_SECRET');
-  const provided = request.headers.get('x-agent-secret') ?? '';
-  if (!secret || !safeEqual(provided, secret)) {
+  const client = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  );
+
+  if (!(await isAuthorized(request.headers.get('x-agent-secret') ?? '', client))) {
     return json({ error: 'No autorizado' }, 401);
   }
 
@@ -53,12 +73,6 @@ Deno.serve(async (request) => {
 
   const today = (body.today as string | undefined) ?? todayInZone();
   const userId = body.userId as string | undefined;
-
-  const client = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  );
 
   const sendEmail = createResendSender(
     Deno.env.get('RESEND_API_KEY'),
