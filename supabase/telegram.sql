@@ -1,4 +1,4 @@
--- FinSmart · alertas por Telegram (fase 2, sesión 1)
+-- FinSmart · bot de Telegram (fase 2, sesiones 1 y 2)
 -- Ejecutar DESPUÉS de agent.sql y agent_cron.sql, completo, en el SQL Editor.
 -- Se puede ejecutar varias veces sin dañar nada.
 --
@@ -141,6 +141,140 @@ $$;
 
 revoke all on function public.telegram_consume_code(text, bigint, text) from public, anon, authenticated;
 grant execute on function public.telegram_consume_code(text, bigint, text) to service_role;
+
+-- ============================================================
+-- GASTOS DESDE TELEGRAM (sesión 2)
+-- El bot arma un borrador, la persona lo confirma con botones y se guarda
+-- todo en una sola transacción: el gasto, el saldo, la versión (para que la
+-- app recargue en vez de pisarlo) y lo que el detector aprende.
+-- ============================================================
+
+create table if not exists public.telegram_drafts (
+  id text primary key default substr(replace(gen_random_uuid()::text, '-', ''), 1, 12),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  title text not null check (char_length(trim(title)) > 0),
+  amount numeric(14, 2) not null check (amount > 0),
+  category text not null,
+  is_ant boolean not null default false,
+  suggested_category text not null,
+  suggested_ant boolean not null,
+  confidence numeric,
+  edited boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists telegram_drafts_user_idx on public.telegram_drafts (user_id, created_at);
+
+alter table public.telegram_drafts enable row level security;
+revoke all on public.telegram_drafts from anon, authenticated;
+-- Sin políticas: solo la función del bot (service_role) los toca.
+
+create or replace function public.telegram_save_draft(
+  p_user_id uuid,
+  p_draft_id text,
+  p_expense_id text,
+  p_date date
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_draft public.telegram_drafts%rowtype;
+  v_balance numeric;
+begin
+  -- Borrar el borrador al usarlo evita guardar dos veces si se toca el botón dos veces.
+  delete from public.telegram_drafts
+  where id = p_draft_id and user_id = p_user_id and created_at > now() - interval '1 day'
+  returning * into v_draft;
+
+  if v_draft.id is null then
+    return null;
+  end if;
+
+  update public.finance_settings
+  set current_balance = greatest(0, current_balance - v_draft.amount),
+      state_version = state_version + 1,
+      updated_at = now()
+  where user_id = p_user_id
+  returning current_balance into v_balance;
+
+  if v_balance is null then
+    raise exception 'El usuario no tiene configuración financiera';
+  end if;
+
+  insert into public.expenses (user_id, id, date, title, category, amount, is_ant_expense, ant_tag, notes)
+  values (
+    p_user_id, p_expense_id, p_date, v_draft.title, v_draft.category, v_draft.amount, v_draft.is_ant,
+    case when v_draft.is_ant then case v_draft.category
+      when 'cafe_snacks' then 'cafe_chucherias'
+      when 'alimentacion' then 'delivery'
+      when 'suscripciones' then 'suscripcion_olvidada'
+      when 'transporte' then 'transporte_evitable'
+      when 'compras_impulso' then 'antojo_impulso'
+      else 'otro_hormiga' end end,
+    'Registrado desde Telegram'
+  );
+
+  insert into public.agent_feedback (user_id, concept, suggested_category, final_category, suggested_ant, final_ant)
+  values (p_user_id, v_draft.title, v_draft.suggested_category, v_draft.category, v_draft.suggested_ant, v_draft.is_ant);
+
+  return jsonb_build_object(
+    'expense_id', p_expense_id,
+    'title', v_draft.title,
+    'amount', v_draft.amount,
+    'category', v_draft.category,
+    'is_ant', v_draft.is_ant,
+    'balance', v_balance
+  );
+end;
+$$;
+
+create or replace function public.telegram_undo_expense(p_user_id uuid, p_expense_id text)
+returns numeric
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_amount numeric;
+  v_title text;
+  v_balance numeric;
+begin
+  -- Solo gastos creados por el bot.
+  delete from public.expenses
+  where user_id = p_user_id and id = p_expense_id and id like 'tg-%'
+  returning amount, title into v_amount, v_title;
+
+  if v_amount is null then
+    return null;
+  end if;
+
+  -- Lo que aprendió de ese gasto también se descarta.
+  delete from public.agent_feedback
+  where id = (
+    select id from public.agent_feedback
+    where user_id = p_user_id and concept = v_title
+    order by created_at desc
+    limit 1
+  );
+
+  update public.finance_settings
+  set current_balance = current_balance + v_amount,
+      state_version = state_version + 1,
+      updated_at = now()
+  where user_id = p_user_id
+  returning current_balance into v_balance;
+
+  return v_balance;
+end;
+$$;
+
+revoke all on function public.telegram_save_draft(uuid, text, text, date) from public, anon, authenticated;
+grant execute on function public.telegram_save_draft(uuid, text, text, date) to service_role;
+revoke all on function public.telegram_undo_expense(uuid, text) from public, anon, authenticated;
+grant execute on function public.telegram_undo_expense(uuid, text) to service_role;
 
 -- ============================================================
 -- SECRETO DEL WEBHOOK

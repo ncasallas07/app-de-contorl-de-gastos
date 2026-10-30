@@ -135,7 +135,8 @@ supabase/
       supabaseStore.ts      lectura y escritura en Postgres
       notify.ts             correos con Resend
       telegram.ts           API de Telegram y resumen de alertas
-      telegramBot.ts        respuestas del bot (/start, /ayuda, /desvincular)
+      telegramBot.ts        respuestas del bot (comandos y botones)
+      botViews.ts           textos del bot: resumen, deudas, plan y gastos
       auth.ts               verificación del secreto del cron
       zone.ts               fechas en la zona de Bogotá
       agentTypes.ts         tipos comunes
@@ -236,13 +237,28 @@ quieres correr Supabase completo en tu computador.
 
    Desde ahí, cada ejecución del agente manda **un solo mensaje** con todo lo
    nuevo, de lo más urgente a lo menos. Si nada es urgente llega en silencio.
+
+   Lo que se le puede escribir al bot:
+
+   | Mensaje | Qué hace |
+   |---|---|
+   | `/resumen` | saldo, próximo pago, gastos y gastos hormiga del mes, próxima cuota |
+   | `/deudas` | deudas activas ordenadas por vencimiento |
+   | `/plan` | plan sin deudas (capa 3): fecha de salida y pagos del mes |
+   | `tinto 3500`, `almuerzo $15.000`, `uber 12k` o `/gasto ...` | registra un gasto |
+
+   Al registrar un gasto, el detector de la capa 5 sugiere la categoría y si es
+   hormiga; la persona confirma o corrige con botones y el agente aprende de la
+   corrección. El gasto se guarda en una sola transacción (`telegram_save_draft`):
+   descuenta el saldo y sube `state_version`, así la app recarga en vez de
+   pisarlo. El botón *Deshacer* lo revierte.
    El bot solo responde en chats privados y a cuentas vinculadas; Telegram
    firma cada mensaje con un secreto que vive en Vault.
 
 ## Pruebas
 
 ```bash
-npm run agent:test     # 81 pruebas: las 5 capas, fechas, orquestador y Telegram
+npm run agent:test     # 92 pruebas: las 5 capas, fechas, orquestador y bot de Telegram
 npm run agent:check    # revisión de tipos de la función
 ```
 

@@ -1,6 +1,7 @@
 import { deepStrictEqual as assertEquals, ok } from 'node:assert/strict';
 import { createTelegramApi, escapeHtml, formatDigest, TELEGRAM_MAX } from '../_shared/telegram.ts';
-import { type BotDeps, handleUpdate, HELP, type LinkResult, parseCommand } from '../_shared/telegramBot.ts';
+import { HELP, parseCommand } from '../_shared/telegramBot.ts';
+import { fakeBot } from './fake_bot.ts';
 
 Deno.test('escapeHtml protege los mensajes de etiquetas', () => {
   assertEquals(escapeHtml('Café <b> & "té"'), 'Café &lt;b&gt; &amp; "té"');
@@ -49,36 +50,6 @@ Deno.test('createTelegramApi llama la API y devuelve false si falla', async () =
   assertEquals(await api.sendMessage(5, 'hola'), false);
 });
 
-/** Bot con una base de datos en memoria. */
-function fakeBot() {
-  const links = new Map<number, string>();
-  const codes = new Map<string, string>([['ABCD1234', 'ana'], ['ZZZZ9999', 'beto']]);
-  const replies: { chatId: number; text: string }[] = [];
-  const deps: BotDeps = {
-    findUserByChat: (chatId) => Promise.resolve(links.get(chatId) ?? null),
-    linkWithCode: (code, chatId): Promise<LinkResult> => {
-      const userId = codes.get(code);
-      if (!userId) return Promise.resolve({ ok: false, reason: 'codigo_invalido' });
-      codes.delete(code);
-      const owner = links.get(chatId);
-      if (owner && owner !== userId) return Promise.resolve({ ok: false, reason: 'chat_de_otra_cuenta' });
-      links.set(chatId, userId);
-      return Promise.resolve({ ok: true });
-    },
-    unlink: (chatId) => {
-      links.delete(chatId);
-      return Promise.resolve();
-    },
-    reply: (chatId, text) => {
-      replies.push({ chatId, text });
-      return Promise.resolve(true);
-    },
-  };
-  const say = (chatId: number, text: string, type = 'private') =>
-    handleUpdate({ update_id: 1, message: { chat: { id: chatId, type }, text } }, deps);
-  return { links, replies, say };
-}
-
 Deno.test('bot: vincula con un código válido y solo una vez', async () => {
   const bot = fakeBot();
   await bot.say(7, '/start abcd1234');
@@ -110,7 +81,7 @@ Deno.test('bot: es privado para chats sin vincular y no responde en grupos', asy
 Deno.test('bot: ayuda y desvincular', async () => {
   const bot = fakeBot();
   await bot.say(7, '/start ABCD1234');
-  await bot.say(7, 'hola');
+  await bot.say(7, '/comando_raro');
   assertEquals(bot.replies.at(-1)?.text, HELP);
   await bot.say(7, '/desvincular');
   assertEquals(bot.links.has(7), false);

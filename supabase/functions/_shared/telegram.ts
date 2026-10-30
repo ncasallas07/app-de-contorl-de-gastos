@@ -8,8 +8,13 @@ type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 export interface TelegramApi {
   /** Llama un método de la API. Devuelve `result` o lanza un error con la descripción. */
   call<T = unknown>(method: string, payload: Record<string, unknown>): Promise<T>;
-  sendMessage(chatId: number, text: string, options?: { silent?: boolean }): Promise<boolean>;
+  sendMessage(chatId: number, text: string, options?: { silent?: boolean; keyboard?: InlineKeyboard }): Promise<boolean>;
+  editMessage(chatId: number, messageId: number, text: string, keyboard?: InlineKeyboard): Promise<boolean>;
+  answerCallback(callbackId: string, text?: string): Promise<boolean>;
 }
+
+/** Botones bajo un mensaje (inline keyboard). */
+export type InlineKeyboard = { text: string; callback_data: string }[][];
 
 export function createTelegramApi(token: string, fetchFn: FetchLike = fetch): TelegramApi {
   const call = async <T>(method: string, payload: Record<string, unknown>): Promise<T> => {
@@ -35,7 +40,32 @@ export function createTelegramApi(token: string, fetchFn: FetchLike = fetch): Te
           parse_mode: 'HTML',
           disable_web_page_preview: true,
           disable_notification: options.silent ?? false,
+          ...(options.keyboard ? { reply_markup: { inline_keyboard: options.keyboard } } : {}),
         });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async editMessage(chatId, messageId, text, keyboard) {
+      try {
+        await call('editMessageText', {
+          chat_id: chatId,
+          message_id: messageId,
+          text,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          // Sin botones = se quitan los anteriores.
+          reply_markup: { inline_keyboard: keyboard ?? [] },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async answerCallback(callbackId, text) {
+      try {
+        await call('answerCallbackQuery', { callback_query_id: callbackId, ...(text ? { text } : {}) });
         return true;
       } catch {
         return false;

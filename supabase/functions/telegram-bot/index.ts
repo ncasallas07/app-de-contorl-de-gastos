@@ -12,7 +12,43 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { isAuthorized, safeEqual } from '../_shared/auth.ts';
 import { createTelegramApi, type TelegramApi } from '../_shared/telegram.ts';
-import { type BotDeps, handleUpdate, type LinkResult, type TelegramUpdate } from '../_shared/telegramBot.ts';
+import {
+  type BotDeps,
+  handleUpdate,
+  type LinkResult,
+  type StoredDraft,
+  type TelegramUpdate,
+} from '../_shared/telegramBot.ts';
+import { createSupabaseStore } from '../_shared/supabaseStore.ts';
+import { todayInZone } from '../_shared/zone.ts';
+import type { ExpenseCategory } from '../_shared/finance/finance.ts';
+
+interface DraftRow {
+  id: string;
+  title: string;
+  amount: number | string;
+  category: ExpenseCategory;
+  is_ant: boolean;
+  suggested_category: ExpenseCategory;
+  suggested_ant: boolean;
+  confidence: number | string | null;
+  edited: boolean;
+}
+
+const toDraft = (row: DraftRow): StoredDraft => ({
+  id: row.id,
+  title: row.title,
+  amount: Number(row.amount),
+  category: row.category,
+  isAnt: row.is_ant,
+  suggestedCategory: row.suggested_category,
+  suggestedAnt: row.suggested_ant,
+  confidence: row.confidence === null ? null : Number(row.confidence),
+  edited: row.edited,
+});
+
+const DRAFT_COLUMNS = 'id, title, amount, category, is_ant, suggested_category, suggested_ant, confidence, edited';
+const DRAFT_TTL_MS = 86_400_000;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -44,7 +80,75 @@ function botDeps(client: SupabaseClient, telegram: TelegramApi): BotDeps {
       const { error } = await client.from('telegram_links').delete().eq('chat_id', chatId);
       if (error) throw new Error(`No se pudo desvincular: ${error.message}`);
     },
-    reply: (chatId, text) => telegram.sendMessage(chatId, text),
+    reply: (chatId, text, keyboard) => telegram.sendMessage(chatId, text, { keyboard }),
+    edit: (chatId, messageId, text, keyboard) => telegram.editMessage(chatId, messageId, text, keyboard),
+    answer: (callbackId, text) => telegram.answerCallback(callbackId, text),
+    today: () => todayInZone(),
+    loadState: (userId) => createSupabaseStore(client).loadUserState(userId),
+
+    async createDraft(userId, draft) {
+      // De paso se limpian los borradores viejos de esta persona.
+      await client.from('telegram_drafts').delete().eq('user_id', userId)
+        .lt('created_at', new Date(Date.now() - DRAFT_TTL_MS).toISOString());
+      const { data, error } = await client.from('telegram_drafts').insert({
+        user_id: userId,
+        title: draft.title,
+        amount: draft.amount,
+        category: draft.category,
+        is_ant: draft.isAnt,
+        suggested_category: draft.suggestedCategory,
+        suggested_ant: draft.suggestedAnt,
+        confidence: draft.confidence,
+        edited: draft.edited,
+      }).select('id').single();
+      if (error) throw new Error(`No se pudo crear el borrador: ${error.message}`);
+      return data.id as string;
+    },
+    async getDraft(userId, draftId) {
+      const { data } = await client.from('telegram_drafts').select(DRAFT_COLUMNS)
+        .eq('user_id', userId).eq('id', draftId)
+        .gt('created_at', new Date(Date.now() - DRAFT_TTL_MS).toISOString())
+        .maybeSingle<DraftRow>();
+      return data ? toDraft(data) : null;
+    },
+    async updateDraft(userId, draftId, patch) {
+      const row: Record<string, unknown> = {};
+      if (patch.category !== undefined) row.category = patch.category;
+      if (patch.isAnt !== undefined) row.is_ant = patch.isAnt;
+      if (patch.edited !== undefined) row.edited = patch.edited;
+      const { error } = await client.from('telegram_drafts').update(row).eq('user_id', userId).eq('id', draftId);
+      if (error) throw new Error(`No se pudo actualizar el borrador: ${error.message}`);
+    },
+    async deleteDraft(userId, draftId) {
+      await client.from('telegram_drafts').delete().eq('user_id', userId).eq('id', draftId);
+    },
+    async saveDraft(userId, draftId, expenseId, date) {
+      const { data, error } = await client.rpc('telegram_save_draft', {
+        p_user_id: userId,
+        p_draft_id: draftId,
+        p_expense_id: expenseId,
+        p_date: date,
+      });
+      if (error) throw new Error(`No se pudo guardar el gasto: ${error.message}`);
+      if (!data) return null;
+      return {
+        expenseId: data.expense_id,
+        title: data.title,
+        amount: Number(data.amount),
+        category: data.category,
+        isAnt: data.is_ant,
+        balance: Number(data.balance),
+      };
+    },
+    async undoExpense(userId, expenseId) {
+      const { data, error } = await client.rpc('telegram_undo_expense', {
+        p_user_id: userId,
+        p_expense_id: expenseId,
+      });
+      if (error) throw new Error(`No se pudo deshacer: ${error.message}`);
+      return data === null ? null : Number(data);
+    },
+    newExpenseId: () => `tg-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`,
   };
 }
 
@@ -58,11 +162,15 @@ async function admin(action: unknown, client: SupabaseClient, telegram: Telegram
     await telegram.call('setWebhook', {
       url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/telegram-bot`,
       secret_token: secret,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
       drop_pending_updates: true,
     });
     await telegram.call('setMyCommands', {
       commands: [
+        { command: 'resumen', description: 'Saldo, próximo pago y gastos del mes' },
+        { command: 'deudas', description: 'Tus deudas y vencimientos' },
+        { command: 'plan', description: 'Tu plan para quedar sin deudas' },
+        { command: 'gasto', description: 'Registrar un gasto (ej: tinto 3500)' },
         { command: 'ayuda', description: 'Ver qué puedo hacer' },
         { command: 'desvincular', description: 'Dejar de recibir alertas aquí' },
       ],
