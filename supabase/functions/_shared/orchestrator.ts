@@ -1,8 +1,8 @@
 // Orquestador del agente: ejecuta las capas para un usuario.
 //
 //   Percibir → 2. Modelo (ciclo) → 3. Objetivos (planificador)
+//            → 4. Utilidad (asesor, solo el día de pago)
 //            → 1. Reactivo (vigilante) → Actuar
-//   4. Utilidad (asesor)           ← versión completa
 //   5. Aprendizaje (hormiga)       ← versión completa
 //
 // Primero el agente actualiza su modelo del mundo (pagos, cuotas renovadas),
@@ -23,7 +23,9 @@ import type { PlanRow } from './finance/debtPlanner.ts';
 import type { AgentAction, StoredAction } from './agentTypes.ts';
 import { runWatcher } from './agents/watcher.ts';
 import { applyDebtUpdates, type DebtUpdate, runCycle } from './agents/cycle.ts';
-import { type Goal, runPlanner, STORED_PLAN_MONTHS } from './agents/planner.ts';
+import { DEFAULT_TARGET_MONTHS, type Goal, runPlanner, STORED_PLAN_MONTHS } from './agents/planner.ts';
+import { runPayroll } from './agents/payroll.ts';
+import { buildDebtPlan } from './finance/debtPlanner.ts';
 import { buildAlertEmail, type EmailSender } from './notify.ts';
 
 /** Lo que el agente percibe de un usuario. */
@@ -136,6 +138,31 @@ export async function runAgentForUser(
       await store.replacePlan(userId, planner.plan.schedule.filter((row) => keep.has(row.month)));
     }
     decided.push(...planner.actions);
+
+    // Capa 4: basada en utilidad, solo si hoy la capa 2 sumó un pago.
+    const lastPay = applied === null
+      ? undefined
+      : [...cycle.actions].reverse().find((action) => action.kind === 'pago_aplicado');
+    if (lastPay) {
+      layers.push('asesor');
+      const plan = planner.plan ?? buildDebtPlan({
+        salary: state.salary,
+        debts,
+        expenses: state.expenses,
+        method: state.strategyMode,
+        targetMonths: state.goal?.targetMonths ?? DEFAULT_TARGET_MONTHS,
+        todayIso,
+      });
+      decided.push(...runPayroll({
+        salary: state.salary,
+        debts,
+        plan,
+        payday: lastPay.data.payday as string,
+        paycheck: lastPay.data.amount as number,
+        balanceAfter: state.salary.currentBalance + balanceDelta,
+        emergencyFundMin: state.goal?.emergencyFundMin ?? null,
+      }).actions);
+    }
 
     // Capa 1: reactivo simple, sobre el estado ya actualizado.
     layers.push('vigilante');

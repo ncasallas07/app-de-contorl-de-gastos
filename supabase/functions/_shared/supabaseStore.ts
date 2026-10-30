@@ -127,7 +127,7 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
           .eq('user_id', userId)
           .gte('date', since),
         client.from('agent_goals')
-          .select('target_months, active')
+          .select('target_months, active, emergency_fund_min')
           .eq('user_id', userId)
           .maybeSingle(),
       ]);
@@ -149,6 +149,7 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
           ? {
             targetMonths: (goal.data as { target_months: number }).target_months,
             active: (goal.data as { active: boolean }).active,
+            emergencyFundMin: num((goal.data as { emergency_fund_min: number | string }).emergency_fund_min),
           }
           : null,
         stateVersion: num(settingsRow.state_version),

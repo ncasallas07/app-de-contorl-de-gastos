@@ -248,7 +248,8 @@ function findRequiredExtra(debts: DebtRecord[], method: StrategyMethod, targetMo
 // ---------- Plan ----------
 
 export function buildDebtPlan(input: PlanInput): DebtPlan {
-  const targetMonths = Math.min(120, Math.max(1, Math.round(input.targetMonths)));
+  const requested = Number.isFinite(input.targetMonths) ? Math.round(input.targetMonths) : 12;
+  const targetMonths = Math.min(120, Math.max(1, requested));
   const monthlyIncome = Math.round(getMonthlyIncome(input.salary));
   const spending = estimateMonthlySpending(input.expenses, monthlyIncome, input.todayIso);
   const open = activeDebts(input.debts);

@@ -10,7 +10,7 @@ Está construido por capas, de menor a mayor complejidad (Russell y Norvig):
 | 1. Vigilante de vencimientos | Reactivo simple | `_shared/agents/watcher.ts` | Listo |
 | 2. Cierre de ciclo | Basado en modelo | `_shared/agents/cycle.ts` | Listo |
 | 3. Planificador sin deudas | Basado en objetivos | `_shared/agents/planner.ts` | Listo |
-| 4. Asesor de nómina | Basado en utilidad | `_shared/agents/payroll.ts` | Versión completa |
+| 4. Asesor de nómina | Basado en utilidad | `_shared/agents/payroll.ts` | Listo |
 | 5. Detector de gastos hormiga | Que aprende | `_shared/agents/antLearner.ts` | Versión completa |
 
 ## Cómo funciona
@@ -22,9 +22,10 @@ Supabase Cron (5:00 a. m. Bogotá) → public.run_finsmart_agent()
             1. percibe: contrato, balance, deudas, jornadas y su memoria (agent_state)
             2. capa 2 (modelo): suma pagos y renueva cuotas → agent_apply_cycle (atómico)
             3. capa 3 (objetivos): replanifica hacia la meta → agent_replace_plan
-            4. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
-            5. actúa: guarda en agent_actions y envía un correo con lo urgente
-            6. registra la ejecución en agent_runs
+            4. capa 4 (utilidad): si hoy hubo pago, recomienda cómo repartirlo
+            5. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
+            6. actúa: guarda en agent_actions y envía un correo con lo urgente
+            7. registra la ejecución en agent_runs
 ```
 
 El orden es a propósito: primero el agente actualiza su modelo del mundo,
@@ -58,6 +59,21 @@ reactivas revisan los vencimientos.
   solo avisa cuando el plan cambia de verdad.
   La simulación vive en `src/utils/debtPlanner.ts` y es la misma que usa la
   pantalla "Plan sin deudas" de la app.
+- **Capa 4 (asesor de nómina):** se activa el día en que la capa 2 suma un
+  pago. Del pago separa los gastos y cuotas del periodo y compara repartos del
+  disponible (en pasos de 5 % y el abono exacto que pide la capa 3) entre
+  abono extra a la deuda prioritaria y colchón de emergencia. Elige el de
+  mayor **utilidad en pesos a 12 meses**:
+
+  `U = abono × ((1 + tasa mensual)^12 − 1) − K × faltante² ÷ colchón meta`
+
+  El primer término son los intereses que se ahorran; el segundo, el costo
+  esperado de quedarse sin colchón (K = costo a un año de un crédito caro,
+  mínimo 30 % anual). Es cuadrático para que la utilidad del ahorro sea
+  decreciente: con tasas iguales, el óptimo llena el colchón hasta la mitad y
+  luego abona. El colchón meta lo fija el usuario (`agent_goals.emergency_fund_min`)
+  o es un mes de gastos y cuotas. La lógica vive en `src/utils/payrollAdvisor.ts`
+  y la pantalla "Asesor de nómina" de Estrategia la usa en vivo.
 - **Sin pisarse con la app:** `finance_settings.state_version` sube con cada
   guardado. La app guarda indicando la versión que cargó y el agente aplica sus
   cambios con `agent_apply_cycle` solo si nadie guardó desde que leyó. Si hay
@@ -95,6 +111,7 @@ supabase/
       agents/watcher.ts     capa 1
       agents/cycle.ts       capa 2
       agents/planner.ts     capa 3 (usa finance/debtPlanner.ts)
+      agents/payroll.ts     capa 4 (usa finance/payrollAdvisor.ts)
       supabaseStore.ts      lectura y escritura en Postgres
       notify.ts             correos con Resend
       zone.ts               fechas en la zona de Bogotá
@@ -173,7 +190,7 @@ quieres correr Supabase completo en tu computador.
 ## Pruebas
 
 ```bash
-npm run agent:test     # 45 pruebas: vigilante, ciclo, planificador, fechas y orquestador
+npm run agent:test     # 59 pruebas: las 4 capas, fechas y orquestador
 npm run agent:check    # revisión de tipos de la función
 ```
 

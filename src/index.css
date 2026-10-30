@@ -1735,6 +1735,133 @@ body.light-theme .vt-gauge .track {
   }
 }
 
+/* ===== PAYROLL ADVISOR (agent layer 4) ===== */
+
+.vt-pay-fund.input-field {
+  width: 120px;
+  text-align: right;
+}
+
+.vt-pay-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.vt-pay-head span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.vt-pay-head strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vt-pay-bar {
+  display: flex;
+  height: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: 99px;
+}
+
+.vt-pay-bar i,
+.vt-pay-legend i {
+  display: block;
+}
+
+.vt-pay-bar i.needs,
+.vt-pay-legend i.needs { background: var(--surface-3); }
+.vt-pay-bar i.debt,
+.vt-pay-legend i.debt { background: var(--accent); }
+.vt-pay-bar i.save,
+.vt-pay-legend i.save { background: var(--warn); }
+
+.vt-pay-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 8px 0 14px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-strong);
+  font-size: 9.5px;
+}
+
+.vt-pay-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vt-pay-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.vt-pay-legend strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.vt-pay-table-wrap {
+  overflow-x: auto;
+}
+
+.vt-pay-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vt-pay-table caption {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: left;
+}
+
+.vt-pay-table th {
+  padding: 6px 8px;
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.vt-pay-table td {
+  padding: 7px 8px;
+  color: var(--muted-strong);
+  font-family: var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.vt-pay-table tr.best td {
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.vt-pay-table td .vt-badge {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+@media (max-width: 760px) {
+  .vt-pay .vt-card-head {
+    flex-direction: column;
+  }
+}
+
 /* ===== CALENDAR ===== */
 
 .vt-cal-layout {

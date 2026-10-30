@@ -149,3 +149,7 @@ Deno.test('el saldo total del calendario baja hasta cero', () => {
   assertEquals(series.at(-1)?.remaining, 0);
   ok(series.every((point, i) => i === 0 || point.remaining <= series[i - 1].remaining));
 });
+
+Deno.test('una meta inválida usa 12 meses', () => {
+  assertEquals(buildDebtPlan(input({ targetMonths: Number.NaN })).targetMonths, 12);
+});

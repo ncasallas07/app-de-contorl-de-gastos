@@ -200,7 +200,7 @@ Deno.test('un usuario con error no detiene a los demás y queda en la bitácora'
 });
 
 Deno.test('capa 3: guarda el plan y solo avisa de nuevo cuando el plan cambia', async () => {
-  const memory = memoryStore({ ana: user({ goal: { targetMonths: 12, active: true } }) });
+  const memory = memoryStore({ ana: user({ goal: { targetMonths: 12, active: true, emergencyFundMin: 0 } }) });
 
   await runAgent('2026-11-01', memory.store, okSender);
   await runAgent('2026-11-02', memory.store, okSender);
@@ -212,7 +212,7 @@ Deno.test('capa 3: guarda el plan y solo avisa de nuevo cuando el plan cambia', 
   assertEquals(memory.plans.ana.at(-1)?.remaining, 0);
 
   // El usuario acorta la meta a 3 meses: ya no cabe en su capacidad → aviso nuevo por correo.
-  memory.users.ana.state.goal = { targetMonths: 3, active: true };
+  memory.users.ana.state.goal = { targetMonths: 3, active: true, emergencyFundMin: 0 };
   memory.users.ana.state.expenses = [{ date: '2026-11-01', amount: 2_000_000 }];
   await runAgent('2026-11-03', memory.store, okSender);
   const latest = memory.actions.filter((action) => action.layer === 3).at(-1);
@@ -221,8 +221,30 @@ Deno.test('capa 3: guarda el plan y solo avisa de nuevo cuando el plan cambia', 
 });
 
 Deno.test('capa 3: con la meta desactivada no planifica', async () => {
-  const memory = memoryStore({ ana: user({ goal: { targetMonths: 12, active: false } }) });
+  const memory = memoryStore({ ana: user({ goal: { targetMonths: 12, active: false, emergencyFundMin: 0 } }) });
   await runAgent('2026-11-01', memory.store, okSender);
   assertEquals(memory.plans.ana, undefined);
   assertEquals(memory.actions.some((action) => action.layer === 3), false);
+});
+
+Deno.test('capa 4: el día de pago recomienda cómo repartirlo y lo envía por correo', async () => {
+  const memory = memoryStore({ ana: user({ lastPaymentApplied: '2026-11-14' }) });
+
+  const [result] = await runAgent('2026-11-15', memory.store, okSender);
+
+  assertEquals(memory.runs[0].layers, ['ciclo', 'planificador', 'asesor', 'vigilante']);
+  assertEquals(result.balanceDelta, 1_500_000);
+  const advice = memory.actions.find((action) => action.layer === 4);
+  assertEquals(advice?.kind, 'reparto_nomina');
+  assertEquals(advice?.dedupeKey, 'payroll:2026-11-15');
+  assertEquals(advice?.emailed, true);
+  const data = advice?.data as { available: number; toDebt: number; toSavings: number };
+  assertEquals(data.toDebt + data.toSavings, data.available);
+});
+
+Deno.test('capa 4: en un día sin pago no se activa', async () => {
+  const memory = memoryStore({ ana: user({ lastPaymentApplied: '2026-11-15' }) });
+  await runAgent('2026-11-16', memory.store, okSender);
+  assertEquals(memory.runs[0].layers.includes('asesor'), false);
+  assertEquals(memory.actions.some((action) => action.layer === 4), false);
 });

@@ -35,6 +35,7 @@ import { AiAssistantView } from './components/AiAssistantView';
 import { AiChatDock } from './components/AiChatDock';
 import { AgentInbox } from './components/AgentInbox';
 import { DebtFreePlan } from './components/DebtFreePlan';
+import { PayrollAdvisor } from './components/PayrollAdvisor';
 
 const LEGACY_SEED_DEBT_IDS = new Set(['debt-1', 'debt-2', 'debt-3', 'debt-4']);
 const LEGACY_SEED_EXPENSE_IDS = new Set([
@@ -766,6 +767,14 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
           {activeTab === 'strategies' && (
             <div className="vt-view-stack">
               <DebtFreePlan
+                userId={userId}
+                salary={salary}
+                debts={debts}
+                expenses={expenses}
+                method={strategyMode}
+                onSaved={showToast}
+              />
+              <PayrollAdvisor
                 userId={userId}
                 salary={salary}
                 debts={debts}

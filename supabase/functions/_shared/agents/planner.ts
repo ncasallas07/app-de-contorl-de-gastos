@@ -20,6 +20,8 @@ export const STORED_PLAN_MONTHS = 120;
 export interface Goal {
   targetMonths: number;
   active: boolean;
+  /** Colchón de emergencia que quiere tener (0 = un mes de gastos). Lo usa la capa 4. */
+  emergencyFundMin: number;
 }
 
 export interface PlannerInput {

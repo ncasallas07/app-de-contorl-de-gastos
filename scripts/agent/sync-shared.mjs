@@ -17,6 +17,7 @@ const files = [
   { from: 'src/utils/date.ts', to: 'date.ts' },
   { from: 'src/utils/contract.ts', to: 'contract.ts' },
   { from: 'src/utils/debtPlanner.ts', to: 'debtPlanner.ts' },
+  { from: 'src/utils/payrollAdvisor.ts', to: 'payrollAdvisor.ts' },
 ];
 
 // Deno exige la extensión en los imports relativos.
@@ -24,6 +25,7 @@ const rewrites = [
   [/from '\.\.\/types\/finance'/g, "from './finance.ts'"],
   [/from '\.\/date'/g, "from './date.ts'"],
   [/from '\.\/contract'/g, "from './contract.ts'"],
+  [/from '\.\/debtPlanner'/g, "from './debtPlanner.ts'"],
 ];
 
 mkdirSync(target, { recursive: true });

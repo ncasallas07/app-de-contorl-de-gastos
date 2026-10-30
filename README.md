@@ -46,7 +46,8 @@ Aplicación web responsiva creada con **React 19 + TypeScript + Vite** y basada 
 - Capa 1, agente reactivo: vigila los vencimientos y avisa en la app y por correo.
 - Capa 2, agente basado en modelo: suma la nómina al balance el día de pago y renueva las cuotas ya pagadas.
 - Capa 3, agente basado en objetivos: plan para quedar sin deudas en N meses, con simulación real de intereses.
-- Bandeja "Lo que hizo tu agente" en el Resumen y pantalla "Plan sin deudas" en Estrategia.
+- Capa 4, agente basado en utilidad: el día de pago recomienda cómo repartir el excedente entre deuda y colchón.
+- Bandeja "Lo que hizo tu agente" en el Resumen y pantallas "Plan sin deudas" y "Asesor de nómina" en Estrategia.
 - Instalación, arquitectura y pruebas en [`supabase/functions/README.md`](supabase/functions/README.md).
 
 ---
