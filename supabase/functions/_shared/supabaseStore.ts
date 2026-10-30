@@ -271,6 +271,17 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
       return data.user?.email ?? null;
     },
 
+    async getTelegramChatId(userId) {
+      const { data, error } = await client
+        .from('telegram_links')
+        .select('chat_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      // Si la tabla aún no existe (telegram.sql sin ejecutar) simplemente no hay chat.
+      if (error || !data) return null;
+      return Number(data.chat_id);
+    },
+
     async logRun(entry: RunLog) {
       const { error } = await client.from('agent_runs').insert({
         user_id: entry.userId,

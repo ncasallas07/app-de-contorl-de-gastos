@@ -3951,6 +3951,67 @@ body.light-theme .vt-priority {
   margin-right: 5px;
 }
 
+/* Ajustes · Telegram */
+.tg-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.tg-note code {
+  color: var(--text-soft);
+}
+
+.tg-linked,
+.tg-code {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tg-code > p:first-child {
+  color: var(--text-soft);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.tg-code-value {
+  justify-self: start;
+  padding: 8px 12px;
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  background: var(--surface-3);
+  border: 1px dashed rgba(var(--accent-rgb), 0.4);
+  border-radius: 8px;
+  user-select: all;
+}
+
+.tg-linked .settings-actions,
+.tg-code .settings-actions {
+  gap: 8px;
+}
+
+.tg-linked .settings-actions a.vt-btn,
+.tg-code .settings-actions a.vt-btn {
+  text-decoration: none;
+}
+
+.tg-linked .settings-actions a.vt-btn svg,
+.tg-code .settings-actions a.vt-btn svg {
+  margin-right: 0;
+  margin-left: 5px;
+}
+
+.settings-section > .settings-actions {
+  margin-top: 12px;
+}
+
 /* ===== MOBILE NAV ===== */
 
 .vt-mobile-nav {

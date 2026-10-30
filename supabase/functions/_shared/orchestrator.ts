@@ -28,6 +28,7 @@ import { type LearnerExpense, runAntLearner } from './agents/antLearner.ts';
 import type { FeedbackRecord } from './finance/antLearner.ts';
 import { buildDebtPlan } from './finance/debtPlanner.ts';
 import { buildAlertEmail, type EmailSender } from './notify.ts';
+import { formatDigest } from './telegram.ts';
 
 /** Lo que el agente percibe de un usuario. */
 export interface UserState {
@@ -62,6 +63,8 @@ export interface AgentStore {
   saveActions(userId: string, actions: AgentAction[]): Promise<StoredAction[]>;
   markEmailed(actionIds: string[]): Promise<void>;
   getUserEmail(userId: string): Promise<string | null>;
+  /** Chat de Telegram vinculado (tabla telegram_links), o null. */
+  getTelegramChatId(userId: string): Promise<number | null>;
   logRun(entry: RunLog): Promise<void>;
 }
 
@@ -81,14 +84,19 @@ export interface UserRunResult {
   newActions: number;
   balanceDelta: number;
   emailSent: boolean;
+  telegramSent: boolean;
   error?: string;
 }
+
+/** Envía un mensaje (HTML) a un chat de Telegram. Devuelve si se entregó. */
+export type TelegramSender = (chatId: number, text: string, silent: boolean) => Promise<boolean>;
 
 export async function runAgentForUser(
   userId: string,
   todayIso: string,
   store: AgentStore,
-  sendEmail: EmailSender
+  sendEmail: EmailSender,
+  sendTelegram?: TelegramSender
 ): Promise<UserRunResult> {
   const layers: string[] = [];
   try {
@@ -197,6 +205,21 @@ export async function runAgentForUser(
       }
     }
 
+    // Actuar: un solo mensaje de Telegram con todo lo nuevo. Si nada es
+    // urgente llega en silencio. Un fallo aquí no tumba la ejecución.
+    let telegramSent = false;
+    if (sendTelegram && created.length > 0) {
+      try {
+        const chatId = await store.getTelegramChatId(userId);
+        if (chatId !== null) {
+          telegramSent = await sendTelegram(chatId, formatDigest(created), toNotify.length === 0);
+        }
+      } catch {
+        telegramSent = false;
+      }
+    }
+    if (telegramSent) layers.push('telegram');
+
     await store.logRun({
       userId,
       runDate: todayIso,
@@ -206,7 +229,7 @@ export async function runAgentForUser(
       status: 'ok',
     });
 
-    return { userId, status: 'ok', newActions: created.length, balanceDelta, emailSent };
+    return { userId, status: 'ok', newActions: created.length, balanceDelta, emailSent, telegramSent };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Un error con un usuario no detiene a los demás.
@@ -219,7 +242,9 @@ export async function runAgentForUser(
       status: 'error',
       error: message,
     }).catch(() => undefined);
-    return { userId, status: 'error', newActions: 0, balanceDelta: 0, emailSent: false, error: message };
+    return {
+      userId, status: 'error', newActions: 0, balanceDelta: 0, emailSent: false, telegramSent: false, error: message,
+    };
   }
 }
 
@@ -227,13 +252,14 @@ export async function runAgent(
   todayIso: string,
   store: AgentStore,
   sendEmail: EmailSender,
-  onlyUserId?: string
+  onlyUserId?: string,
+  sendTelegram?: TelegramSender
 ): Promise<UserRunResult[]> {
   const userIds = await store.listUserIds(onlyUserId);
   const results: UserRunResult[] = [];
   // Secuencial a propósito: pocos usuarios y respeta los límites de Resend.
   for (const userId of userIds) {
-    results.push(await runAgentForUser(userId, todayIso, store, sendEmail));
+    results.push(await runAgentForUser(userId, todayIso, store, sendEmail, sendTelegram));
   }
   return results;
 }

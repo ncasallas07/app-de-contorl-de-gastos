@@ -9,10 +9,12 @@
 //   { "userId": "<uuid>" }        ejecutar solo para un usuario
 //   { "today": "2026-11-15" }     simular otra fecha (demo y pruebas)
 
-import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { runAgent } from '../_shared/orchestrator.ts';
 import { createSupabaseStore } from '../_shared/supabaseStore.ts';
 import { createResendSender } from '../_shared/notify.ts';
+import { isAuthorized } from '../_shared/auth.ts';
+import { createTelegramApi } from '../_shared/telegram.ts';
 import { isIsoDate, todayInZone } from '../_shared/zone.ts';
 
 const json = (body: unknown, status = 200) =>
@@ -21,33 +23,7 @@ const json = (body: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json' },
   });
 
-/** Comparación en tiempo constante para no filtrar el secreto por tiempos. */
-function safeEqual(a: string, b: string): boolean {
-  const left = new TextEncoder().encode(a);
-  const right = new TextEncoder().encode(b);
-  let diff = left.length ^ right.length;
-  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
-    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
-  }
-  return diff === 0;
-}
-
-/**
- * El secreto vive en Supabase Vault (lo crea supabase/agent_cron.sql) y se
- * verifica en la base de datos. Opcionalmente también se acepta el secreto
- * de entorno AGENT_CRON_SECRET.
- */
-async function isAuthorized(provided: string, client: SupabaseClient): Promise<boolean> {
-  if (provided.length < 32) return false;
-
-  const envSecret = Deno.env.get('AGENT_CRON_SECRET');
-  if (envSecret && safeEqual(provided, envSecret)) return true;
-
-  const { data, error } = await client.rpc('agent_check_secret', { p_secret: provided });
-  return !error && data === true;
-}
-
-const UUID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (request) => {
   if (request.method !== 'POST') return json({ error: 'Usa POST' }, 405);
@@ -79,13 +55,21 @@ Deno.serve(async (request) => {
     Deno.env.get('RESEND_FROM') ?? undefined
   );
 
+  // Telegram es opcional: sin TELEGRAM_BOT_TOKEN el agente solo usa la app y el correo.
+  const botToken = Deno.env.get('TELEGRAM_BOT_TOKEN');
+  const telegram = botToken ? createTelegramApi(botToken) : null;
+  const sendTelegram = telegram
+    ? (chatId: number, text: string, silent: boolean) => telegram.sendMessage(chatId, text, { silent })
+    : undefined;
+
   try {
-    const results = await runAgent(today, createSupabaseStore(client), sendEmail, userId);
+    const results = await runAgent(today, createSupabaseStore(client), sendEmail, userId, sendTelegram);
     return json({
       today,
       users: results.length,
       newActions: results.reduce((sum, result) => sum + result.newActions, 0),
       balanceAdded: results.reduce((sum, result) => sum + result.balanceDelta, 0),
+      telegramSent: results.filter((result) => result.telegramSent).length,
       errors: results.filter((result) => result.status === 'error'),
     });
   } catch (error) {

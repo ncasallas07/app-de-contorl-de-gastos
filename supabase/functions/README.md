@@ -120,9 +120,11 @@ reactivas revisan los vencimientos.
 supabase/
   agent.sql                 tablas del agente y seguridad (RLS)
   agent_cron.sql            secreto en Vault y ejecución diaria
+  telegram.sql              vinculación con Telegram y secreto del webhook
   functions/
     deno.json               tareas de Deno (test, check, lint)
     agent-run/index.ts      punto de entrada (Edge Function)
+    telegram-bot/index.ts   bot de Telegram (webhook y administración)
     _shared/
       orchestrator.ts       ejecuta las capas en orden
       agents/watcher.ts     capa 1
@@ -132,6 +134,9 @@ supabase/
       agents/antLearner.ts  capa 5 (usa finance/antLearner.ts)
       supabaseStore.ts      lectura y escritura en Postgres
       notify.ts             correos con Resend
+      telegram.ts           API de Telegram y resumen de alertas
+      telegramBot.ts        respuestas del bot (/start, /ayuda, /desvincular)
+      auth.ts               verificación del secreto del cron
       zone.ts               fechas en la zona de Bogotá
       agentTypes.ts         tipos comunes
       finance/              copia generada de la lógica de la app
@@ -205,10 +210,39 @@ quieres correr Supabase completo en tu computador.
    suma ese pago de verdad y su memoria avanza hasta esa fecha. Para la demo usa
    una cuenta de prueba, no la tuya real.
 
+7. **Alertas por Telegram (opcional).**
+   1. En Telegram, crea un bot con [@BotFather](https://t.me/BotFather)
+      (`/newbot`). Te entrega un token: **no lo pegues en ningún chat ni en el
+      código**; guárdalo directamente como secreto:
+
+      ```bash
+      npx supabase secrets set TELEGRAM_BOT_TOKEN=<token-de-botfather>
+      npx supabase functions deploy telegram-bot --no-verify-jwt --use-api
+      npx supabase functions deploy agent-run --no-verify-jwt --use-api
+      ```
+
+   2. Ejecuta completo `supabase/telegram.sql` en el SQL Editor y luego:
+
+      ```sql
+      select public.telegram_setup();   -- conecta el bot con la función
+      select status_code, content from net._http_response order by created desc limit 1;
+      ```
+
+      Respuesta esperada: `{"ok":true,"bot":"@TuBot"}`.
+   3. En la app: *Ajustes de cuenta > Alertas por Telegram > Conectar
+      Telegram*. Se abre el bot con un código de un solo uso (vence en 10
+      minutos); al pulsar *Iniciar* queda vinculado.
+   4. `select public.telegram_test();` envía un mensaje de prueba.
+
+   Desde ahí, cada ejecución del agente manda **un solo mensaje** con todo lo
+   nuevo, de lo más urgente a lo menos. Si nada es urgente llega en silencio.
+   El bot solo responde en chats privados y a cuentas vinculadas; Telegram
+   firma cada mensaje con un secreto que vive en Vault.
+
 ## Pruebas
 
 ```bash
-npm run agent:test     # 70 pruebas: las 5 capas, fechas y orquestador
+npm run agent:test     # 81 pruebas: las 5 capas, fechas, orquestador y Telegram
 npm run agent:check    # revisión de tipos de la función
 ```
 

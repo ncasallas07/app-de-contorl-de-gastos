@@ -51,6 +51,7 @@ function memoryStore(users: Record<string, MemoryUser>) {
   const actions: (StoredAction & { userId: string; emailed: boolean })[] = [];
   const runs: RunLog[] = [];
   const plans: Record<string, PlanRow[]> = {};
+  const chats: Record<string, number> = {};
   let nextId = 1;
 
   const store: AgentStore = {
@@ -95,12 +96,13 @@ function memoryStore(users: Record<string, MemoryUser>) {
       return Promise.resolve();
     },
     getUserEmail: (userId) => Promise.resolve(`${userId}@correo.test`),
+    getTelegramChatId: (userId) => Promise.resolve(chats[userId] ?? null),
     logRun: (entry) => {
       runs.push(entry);
       return Promise.resolve();
     },
   };
-  return { store, actions, runs, users, plans };
+  return { store, actions, runs, users, plans, chats };
 }
 
 const user = (overrides: Partial<UserState> = {}): MemoryUser => ({
@@ -282,4 +284,37 @@ Deno.test('capa 5: pronostica los gastos hormiga del mes y señala los no marcad
   await runAgent('2026-11-11', memory.store, okSender);
   assertEquals(memory.actions.filter((action) => action.kind === 'pronostico_hormiga').length, 1);
   ok(memory.actions.length >= before);
+});
+
+Deno.test('telegram: un solo mensaje con lo nuevo y nada al repetir el día', async () => {
+  const memory = memoryStore({ ana: user(), beto: user() });
+  memory.chats.ana = 111;
+  const sent: { chatId: number; text: string; silent: boolean }[] = [];
+  const telegram = (chatId: number, text: string, silent: boolean) => {
+    sent.push({ chatId, text, silent });
+    return Promise.resolve(true);
+  };
+
+  const first = await runAgent('2026-11-08', memory.store, okSender, undefined, telegram);
+  assertEquals(sent.length, 1, 'solo ana tiene Telegram vinculado');
+  assertEquals(sent[0].chatId, 111);
+  ok(sent[0].text.includes('Préstamo carro'));
+  assertEquals(sent[0].silent, false, 'hay una alerta de vencimiento: suena');
+  ok(first.find((result) => result.userId === 'ana')?.telegramSent);
+  ok(memory.runs.some((run) => run.userId === 'ana' && run.layers.includes('telegram')));
+
+  await runAgent('2026-11-08', memory.store, okSender, undefined, telegram);
+  assertEquals(sent.length, 1, 'la segunda ejecución no tiene nada nuevo');
+});
+
+Deno.test('telegram: si falla el envío el agente sigue y lo demás queda guardado', async () => {
+  const memory = memoryStore({ ana: user() });
+  memory.chats.ana = 111;
+  const broken = () => Promise.reject(new Error('Telegram caído'));
+
+  const [result] = await runAgent('2026-11-08', memory.store, okSender, undefined, broken);
+  assertEquals(result.status, 'ok');
+  assertEquals(result.telegramSent, false);
+  ok(result.newActions > 0);
+  ok(result.emailSent);
 });

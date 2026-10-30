@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../auth/authContext';
+import { TelegramSettings } from './TelegramSettings';
 
 interface Props {
   isOpen: boolean;
@@ -341,6 +342,8 @@ const SettingsForm: React.FC<Omit<Props, 'isOpen'>> = ({
             </div>
           </form>
         </section>
+
+        <TelegramSettings />
 
         <section className="settings-section settings-section-inline">
           <div className="settings-section-head">
