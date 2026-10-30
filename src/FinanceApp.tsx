@@ -34,6 +34,7 @@ import { OnboardingScreen, type OnboardingData } from './components/onboarding/O
 import { AiAssistantView } from './components/AiAssistantView';
 import { AiChatDock } from './components/AiChatDock';
 import { AgentInbox } from './components/AgentInbox';
+import { DebtFreePlan } from './components/DebtFreePlan';
 
 const LEGACY_SEED_DEBT_IDS = new Set(['debt-1', 'debt-2', 'debt-3', 'debt-4']);
 const LEGACY_SEED_EXPENSE_IDS = new Set([
@@ -763,12 +764,22 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
           )}
 
           {activeTab === 'strategies' && (
-            <StrategyAdvisorWidget
-              report={strategyReport}
-              salary={salary}
-              onMethodChange={(m: StrategyMethod) => setStrategyMode(m)}
-              onOpenDebtPayment={handlePayInstallment}
-            />
+            <div className="vt-view-stack">
+              <DebtFreePlan
+                userId={userId}
+                salary={salary}
+                debts={debts}
+                expenses={expenses}
+                method={strategyMode}
+                onSaved={showToast}
+              />
+              <StrategyAdvisorWidget
+                report={strategyReport}
+                salary={salary}
+                onMethodChange={(m: StrategyMethod) => setStrategyMode(m)}
+                onOpenDebtPayment={handlePayInstallment}
+              />
+            </div>
           )}
 
           {activeTab === 'assistant' && (

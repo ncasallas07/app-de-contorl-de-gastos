@@ -2,7 +2,7 @@
 // Usa el cliente con service_role: solo existe dentro de la Edge Function.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import type { DebtRecord, SalaryProfile, WorkDayRecord } from './finance/finance.ts';
+import type { DebtRecord, SalaryProfile, StrategyMethod, WorkDayRecord } from './finance/finance.ts';
 import type { StoredAction } from './agentTypes.ts';
 import type { AgentStore, RunLog, UserState } from './orchestrator.ts';
 
@@ -51,6 +51,7 @@ interface SettingsRow {
   payment_day_of_month: number;
   work_days_per_month_target: number;
   current_balance: number | string;
+  strategy_mode: StrategyMethod;
   state_version: number | string;
 }
 
@@ -102,10 +103,10 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
     },
 
     async loadUserState(userId): Promise<UserState> {
-      const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-      const [settings, debts, workDays, agentState] = await Promise.all([
+      const since = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
+      const [settings, debts, workDays, agentState, expenses, goal] = await Promise.all([
         client.from('finance_settings')
-          .select('contract_type, pay_mode, daily_rate, hourly_rate, work_days_per_week, payment_weekday, default_shift, hours_per_shift, monthly_salary, payment_period, payment_day_of_month, work_days_per_month_target, current_balance, state_version')
+          .select('contract_type, pay_mode, daily_rate, hourly_rate, work_days_per_week, payment_weekday, default_shift, hours_per_shift, monthly_salary, payment_period, payment_day_of_month, work_days_per_month_target, current_balance, strategy_mode, state_version')
           .eq('user_id', userId)
           .single(),
         client.from('debts')
@@ -120,9 +121,18 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
           .select('last_payment_applied')
           .eq('user_id', userId)
           .maybeSingle(),
+        // Para estimar el gasto mensual (capa 3).
+        client.from('expenses')
+          .select('date, amount')
+          .eq('user_id', userId)
+          .gte('date', since),
+        client.from('agent_goals')
+          .select('target_months, active')
+          .eq('user_id', userId)
+          .maybeSingle(),
       ]);
 
-      const failed = [settings, debts, workDays, agentState].find((result) => result.error);
+      const failed = [settings, debts, workDays, agentState, expenses, goal].find((result) => result.error);
       if (failed?.error) throw new Error(`No se pudieron leer los datos: ${failed.error.message}`);
 
       const settingsRow = settings.data as SettingsRow;
@@ -130,6 +140,17 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
         salary: mapSettingsRow(settingsRow),
         debts: (debts.data ?? []).map((row) => mapDebtRow(row as DebtRow)),
         workDays: (workDays.data ?? []).map((row) => mapWorkDayRow(row as WorkDayRow)),
+        expenses: (expenses.data ?? []).map((row: { date: string; amount: number | string }) => ({
+          date: row.date,
+          amount: num(row.amount),
+        })),
+        strategyMode: settingsRow.strategy_mode === 'bola_de_nieve' ? 'bola_de_nieve' : 'avalancha',
+        goal: goal.data
+          ? {
+            targetMonths: (goal.data as { target_months: number }).target_months,
+            active: (goal.data as { active: boolean }).active,
+          }
+          : null,
         stateVersion: num(settingsRow.state_version),
         lastPaymentApplied: (agentState.data as { last_payment_applied: string | null } | null)
           ?.last_payment_applied ?? null,
@@ -151,6 +172,20 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
       });
       if (error) throw new Error(`No se pudo aplicar el ciclo: ${error.message}`);
       return data === null ? null : num(data as number | string);
+    },
+
+    async replacePlan(userId, rows) {
+      const { error } = await client.rpc('agent_replace_plan', {
+        p_user_id: userId,
+        p_rows: rows.map((row) => ({
+          month: row.month,
+          debt_id: row.debtId,
+          payment: row.payment,
+          interest: row.interest,
+          remaining: row.remaining,
+        })),
+      });
+      if (error) throw new Error(`No se pudo guardar el plan: ${error.message}`);
     },
 
     async saveActions(userId, actions) {

@@ -1,21 +1,29 @@
 // Orquestador del agente: ejecuta las capas para un usuario.
 //
-//   Percibir → 2. Basado en modelo (ciclo) → 1. Reactivo (vigilante) → Actuar
-//   3. Objetivos (planificador)    ← semana 3
+//   Percibir → 2. Modelo (ciclo) → 3. Objetivos (planificador)
+//            → 1. Reactivo (vigilante) → Actuar
 //   4. Utilidad (asesor)           ← versión completa
 //   5. Aprendizaje (hormiga)       ← versión completa
 //
-// El ciclo va antes que el vigilante: primero el agente actualiza su modelo
-// del mundo (pagos, cuotas renovadas) y luego las reglas reactivas actúan
-// sobre ese estado ya actualizado.
+// Primero el agente actualiza su modelo del mundo (pagos, cuotas renovadas),
+// luego replanifica hacia su meta con ese estado y al final las reglas
+// reactivas revisan los vencimientos.
 //
 // No depende de Supabase: recibe un `AgentStore` (base de datos) y un
 // `EmailSender`. Así se puede probar con datos falsos (ver tests/).
 
-import type { DebtRecord, SalaryProfile, WorkDayRecord } from './finance/finance.ts';
+import type {
+  DebtRecord,
+  ExpenseRecord,
+  SalaryProfile,
+  StrategyMethod,
+  WorkDayRecord,
+} from './finance/finance.ts';
+import type { PlanRow } from './finance/debtPlanner.ts';
 import type { AgentAction, StoredAction } from './agentTypes.ts';
 import { runWatcher } from './agents/watcher.ts';
 import { applyDebtUpdates, type DebtUpdate, runCycle } from './agents/cycle.ts';
+import { type Goal, runPlanner, STORED_PLAN_MONTHS } from './agents/planner.ts';
 import { buildAlertEmail, type EmailSender } from './notify.ts';
 
 /** Lo que el agente percibe de un usuario. */
@@ -23,6 +31,9 @@ export interface UserState {
   salary: SalaryProfile;
   debts: DebtRecord[];
   workDays: WorkDayRecord[];
+  expenses: Pick<ExpenseRecord, 'date' | 'amount'>[];
+  strategyMode: StrategyMethod;
+  goal: Goal | null;
   stateVersion: number;
   lastPaymentApplied: string | null;
 }
@@ -40,6 +51,8 @@ export interface AgentStore {
   loadUserState(userId: string): Promise<UserState>;
   /** Aplica el ciclo de forma atómica. Devuelve la nueva versión, o null si hubo conflicto. */
   applyCycle(userId: string, commit: CycleCommit): Promise<number | null>;
+  /** Reemplaza el plan sin deudas guardado (tabla debt_plans). */
+  replacePlan(userId: string, rows: PlanRow[]): Promise<void>;
   /** Guarda las acciones y devuelve SOLO las nuevas (las repetidas se ignoran). */
   saveActions(userId: string, actions: AgentAction[]): Promise<StoredAction[]>;
   markEmailed(actionIds: string[]): Promise<void>;
@@ -106,6 +119,23 @@ export async function runAgentForUser(
       balanceDelta = cycle.balanceDelta;
       decided.push(...cycle.actions);
     }
+
+    // Capa 3: basada en objetivos, sobre el estado ya actualizado.
+    layers.push('planificador');
+    const planner = runPlanner({
+      salary: { ...state.salary, currentBalance: state.salary.currentBalance + balanceDelta },
+      debts,
+      expenses: state.expenses,
+      method: state.strategyMode,
+      goal: state.goal,
+      todayIso,
+    });
+    if (planner.plan) {
+      const months = new Set(planner.plan.schedule.map((row) => row.month));
+      const keep = new Set([...months].sort().slice(0, STORED_PLAN_MONTHS));
+      await store.replacePlan(userId, planner.plan.schedule.filter((row) => keep.has(row.month)));
+    }
+    decided.push(...planner.actions);
 
     // Capa 1: reactivo simple, sobre el estado ya actualizado.
     layers.push('vigilante');

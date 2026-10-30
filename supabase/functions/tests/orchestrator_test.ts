@@ -9,6 +9,7 @@ import {
   type UserState,
 } from '../_shared/orchestrator.ts';
 import type { EmailMessage, EmailSender } from '../_shared/notify.ts';
+import type { PlanRow } from '../_shared/finance/debtPlanner.ts';
 
 const salary: SalaryProfile = {
   contractType: 'indefinido',
@@ -49,6 +50,7 @@ interface MemoryUser {
 function memoryStore(users: Record<string, MemoryUser>) {
   const actions: (StoredAction & { userId: string; emailed: boolean })[] = [];
   const runs: RunLog[] = [];
+  const plans: Record<string, PlanRow[]> = {};
   let nextId = 1;
 
   const store: AgentStore = {
@@ -74,6 +76,10 @@ function memoryStore(users: Record<string, MemoryUser>) {
       user.state.lastPaymentApplied = commit.lastPaymentApplied;
       return Promise.resolve(user.state.stateVersion);
     },
+    replacePlan: (userId, rows) => {
+      plans[userId] = rows;
+      return Promise.resolve();
+    },
     saveActions: (userId, list: AgentAction[]) => {
       const created: StoredAction[] = [];
       for (const action of list) {
@@ -94,7 +100,7 @@ function memoryStore(users: Record<string, MemoryUser>) {
       return Promise.resolve();
     },
   };
-  return { store, actions, runs, users };
+  return { store, actions, runs, users, plans };
 }
 
 const user = (overrides: Partial<UserState> = {}): MemoryUser => ({
@@ -102,6 +108,9 @@ const user = (overrides: Partial<UserState> = {}): MemoryUser => ({
     salary: { ...salary },
     debts: [{ ...debt }],
     workDays: [],
+    expenses: [],
+    strategyMode: 'avalancha',
+    goal: null,
     stateVersion: 1,
     lastPaymentApplied: '2026-11-01',
     ...overrides,
@@ -149,7 +158,7 @@ Deno.test('si la app guardó mientras el agente pensaba, no pisa nada y lo reint
   assertEquals(result.balanceDelta, 0);
   assertEquals(memory.users.ana.state.salary.currentBalance, 500_000);
   assertEquals(memory.users.ana.state.lastPaymentApplied, '2026-11-14');
-  assertEquals(memory.runs[0].layers, ['ciclo:conflicto', 'vigilante']);
+  assertEquals(memory.runs[0].layers, ['ciclo:conflicto', 'planificador', 'vigilante']);
   assertEquals(memory.actions.some((action) => action.kind === 'pago_aplicado'), false);
 
   // Al día siguiente, sin conflicto, el pago del 15 sí se aplica.
@@ -165,7 +174,7 @@ Deno.test('el vigilante ve la cuota renovada por el ciclo en la misma ejecución
   // 2026-11-25: la cuota pagada del 28 oct se renueva al 28 nov, que vence en 3 días.
   await runAgent('2026-11-25', store, okSender);
 
-  const kinds = actions.map((action) => action.kind).sort();
+  const kinds = actions.filter((action) => action.layer !== 3).map((action) => action.kind).sort();
   assertEquals(kinds, ['cuota_renovada', 'deuda_por_vencer']);
 });
 
@@ -188,4 +197,32 @@ Deno.test('un usuario con error no detiene a los demás y queda en la bitácora'
 
   assertEquals(results.map((result) => result.status), ['error', 'ok']);
   assertEquals(runs.find((run) => run.userId === 'roto')?.error, 'fallo de prueba');
+});
+
+Deno.test('capa 3: guarda el plan y solo avisa de nuevo cuando el plan cambia', async () => {
+  const memory = memoryStore({ ana: user({ goal: { targetMonths: 12, active: true } }) });
+
+  await runAgent('2026-11-01', memory.store, okSender);
+  await runAgent('2026-11-02', memory.store, okSender);
+
+  const planActions = memory.actions.filter((action) => action.layer === 3);
+  assertEquals(planActions.length, 1);
+  assertEquals(planActions[0].kind, 'plan_listo');
+  assertEquals(memory.plans.ana.length > 0, true);
+  assertEquals(memory.plans.ana.at(-1)?.remaining, 0);
+
+  // El usuario acorta la meta a 3 meses: ya no cabe en su capacidad → aviso nuevo por correo.
+  memory.users.ana.state.goal = { targetMonths: 3, active: true };
+  memory.users.ana.state.expenses = [{ date: '2026-11-01', amount: 2_000_000 }];
+  await runAgent('2026-11-03', memory.store, okSender);
+  const latest = memory.actions.filter((action) => action.layer === 3).at(-1);
+  assertEquals(latest?.kind, 'meta_inalcanzable');
+  assertEquals(latest?.emailed, true);
+});
+
+Deno.test('capa 3: con la meta desactivada no planifica', async () => {
+  const memory = memoryStore({ ana: user({ goal: { targetMonths: 12, active: false } }) });
+  await runAgent('2026-11-01', memory.store, okSender);
+  assertEquals(memory.plans.ana, undefined);
+  assertEquals(memory.actions.some((action) => action.layer === 3), false);
 });

@@ -45,7 +45,8 @@ Aplicación web responsiva creada con **React 19 + TypeScript + Vite** y basada 
 - Corre solo en el servidor de Supabase una vez al día, aunque nadie abra la app.
 - Capa 1, agente reactivo: vigila los vencimientos y avisa en la app y por correo.
 - Capa 2, agente basado en modelo: suma la nómina al balance el día de pago y renueva las cuotas ya pagadas.
-- Bandeja "Lo que hizo tu agente" en el Resumen.
+- Capa 3, agente basado en objetivos: plan para quedar sin deudas en N meses, con simulación real de intereses.
+- Bandeja "Lo que hizo tu agente" en el Resumen y pantalla "Plan sin deudas" en Estrategia.
 - Instalación, arquitectura y pruebas en [`supabase/functions/README.md`](supabase/functions/README.md).
 
 ---

@@ -255,6 +255,44 @@ grant execute on function public.agent_apply_cycle(uuid, bigint, numeric, jsonb,
   to service_role;
 
 -- ============================================================
+-- CAPA 3: GUARDAR EL PLAN SIN DEUDAS
+-- Reemplaza el plan del usuario en una sola transacción.
+-- p_rows: [{ "month": "2026-11", "debt_id": "...", "payment": 0,
+--            "interest": 0, "remaining": 0 }, ...]
+-- ============================================================
+
+create or replace function public.agent_replace_plan(p_user_id uuid, p_rows jsonb)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_count integer;
+begin
+  delete from public.debt_plans where user_id = p_user_id;
+
+  insert into public.debt_plans (user_id, month, debt_id, payment, interest, remaining)
+  select
+    p_user_id,
+    to_date(x.month || '-01', 'YYYY-MM-DD'),
+    x.debt_id,
+    greatest(0, x.payment),
+    greatest(0, x.interest),
+    greatest(0, x.remaining)
+  from jsonb_to_recordset(coalesce(p_rows, '[]'::jsonb))
+    as x(month text, debt_id text, payment numeric, interest numeric, remaining numeric)
+  where x.month ~ '^\d{4}-\d{2}$';
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke all on function public.agent_replace_plan(uuid, jsonb) from public, anon, authenticated;
+grant execute on function public.agent_replace_plan(uuid, jsonb) to service_role;
+
+-- ============================================================
 -- EJECUCIÓN DIARIA
 -- Está en supabase/agent_cron.sql (solo funciona en Supabase, porque usa
 -- pg_cron, pg_net y Vault). Ejecútalo después de desplegar agent-run.

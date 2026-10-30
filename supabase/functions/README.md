@@ -9,7 +9,7 @@ Está construido por capas, de menor a mayor complejidad (Russell y Norvig):
 | --- | --- | --- | --- |
 | 1. Vigilante de vencimientos | Reactivo simple | `_shared/agents/watcher.ts` | Listo |
 | 2. Cierre de ciclo | Basado en modelo | `_shared/agents/cycle.ts` | Listo |
-| 3. Planificador sin deudas | Basado en objetivos | `_shared/agents/planner.ts` | Semana 3 |
+| 3. Planificador sin deudas | Basado en objetivos | `_shared/agents/planner.ts` | Listo |
 | 4. Asesor de nómina | Basado en utilidad | `_shared/agents/payroll.ts` | Versión completa |
 | 5. Detector de gastos hormiga | Que aprende | `_shared/agents/antLearner.ts` | Versión completa |
 
@@ -21,13 +21,15 @@ Supabase Cron (5:00 a. m. Bogotá) → public.run_finsmart_agent()
        └─ orchestrator.ts: para cada usuario
             1. percibe: contrato, balance, deudas, jornadas y su memoria (agent_state)
             2. capa 2 (modelo): suma pagos y renueva cuotas → agent_apply_cycle (atómico)
-            3. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
-            4. actúa: guarda en agent_actions y envía un correo con lo urgente
-            5. registra la ejecución en agent_runs
+            3. capa 3 (objetivos): replanifica hacia la meta → agent_replace_plan
+            4. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
+            5. actúa: guarda en agent_actions y envía un correo con lo urgente
+            6. registra la ejecución en agent_runs
 ```
 
-La capa 2 va antes que la 1 a propósito: primero el agente actualiza su
-modelo del mundo y luego las reglas reactivas actúan sobre ese estado.
+El orden es a propósito: primero el agente actualiza su modelo del mundo,
+luego replanifica hacia su meta con ese estado y al final las reglas
+reactivas revisan los vencimientos.
 
 - **Capa 1 (vigilante):** reglas condición → acción. Avisa si una cuota
   pendiente vence en 3 días o menos, vence hoy o ya venció. No guarda memoria;
@@ -44,6 +46,18 @@ modelo del mundo y luego las reglas reactivas actúan sobre ese estado.
     fecha avanza un mes y vuelve a quedar pendiente.
   - La primera vez no suma pagos pasados: el balance que el usuario escribió es
     el punto de partida.
+- **Capa 3 (planificador sin deudas):** la meta es "sin deudas en N meses"
+  (`agent_goals`, la fija el usuario en Estrategia; si no hay, 12 meses).
+  Simula mes a mes cada deuda (interés = saldo × tasa anual ÷ 12), paga las
+  cuotas mínimas, dirige el abono extra a la deuda prioritaria según el método
+  (avalancha o bola de nieve) y suma al abono la cuota de cada deuda que termina.
+  Con búsqueda binaria encuentra el **menor abono extra mensual** que cumple la
+  meta y lo compara con lo que queda libre (ingreso − gasto promedio de 90
+  días − cuotas mínimas). Si no alcanza, arma el mejor plan posible y propone
+  ampliar la meta o cuánto recortar. Guarda el calendario en `debt_plans` y
+  solo avisa cuando el plan cambia de verdad.
+  La simulación vive en `src/utils/debtPlanner.ts` y es la misma que usa la
+  pantalla "Plan sin deudas" de la app.
 - **Sin pisarse con la app:** `finance_settings.state_version` sube con cada
   guardado. La app guarda indicando la versión que cargó y el agente aplica sus
   cambios con `agent_apply_cycle` solo si nadie guardó desde que leyó. Si hay
@@ -80,6 +94,7 @@ supabase/
       orchestrator.ts       ejecuta las capas en orden
       agents/watcher.ts     capa 1
       agents/cycle.ts       capa 2
+      agents/planner.ts     capa 3 (usa finance/debtPlanner.ts)
       supabaseStore.ts      lectura y escritura en Postgres
       notify.ts             correos con Resend
       zone.ts               fechas en la zona de Bogotá
@@ -158,7 +173,7 @@ quieres correr Supabase completo en tu computador.
 ## Pruebas
 
 ```bash
-npm run agent:test     # 32 pruebas: vigilante, cierre de ciclo, fechas y orquestador
+npm run agent:test     # 45 pruebas: vigilante, ciclo, planificador, fechas y orquestador
 npm run agent:check    # revisión de tipos de la función
 ```
 
