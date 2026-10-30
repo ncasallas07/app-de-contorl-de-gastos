@@ -11,7 +11,7 @@ Está construido por capas, de menor a mayor complejidad (Russell y Norvig):
 | 2. Cierre de ciclo | Basado en modelo | `_shared/agents/cycle.ts` | Listo |
 | 3. Planificador sin deudas | Basado en objetivos | `_shared/agents/planner.ts` | Listo |
 | 4. Asesor de nómina | Basado en utilidad | `_shared/agents/payroll.ts` | Listo |
-| 5. Detector de gastos hormiga | Que aprende | `_shared/agents/antLearner.ts` | Versión completa |
+| 5. Detector de gastos hormiga | Que aprende | `_shared/agents/antLearner.ts` | Listo |
 
 ## Cómo funciona
 
@@ -23,9 +23,10 @@ Supabase Cron (5:00 a. m. Bogotá) → public.run_finsmart_agent()
             2. capa 2 (modelo): suma pagos y renueva cuotas → agent_apply_cycle (atómico)
             3. capa 3 (objetivos): replanifica hacia la meta → agent_replace_plan
             4. capa 4 (utilidad): si hoy hubo pago, recomienda cómo repartirlo
-            5. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
-            6. actúa: guarda en agent_actions y envía un correo con lo urgente
-            7. registra la ejecución en agent_runs
+            5. capa 5 (aprendizaje): reentrena el detector, pronostica el mes y señala gastos
+            6. capa 1 (reactivo): revisa vencimientos sobre el estado ya actualizado
+            7. actúa: guarda en agent_actions y envía un correo con lo urgente
+            8. registra la ejecución en agent_runs
 ```
 
 El orden es a propósito: primero el agente actualiza su modelo del mundo,
@@ -74,6 +75,22 @@ reactivas revisan los vencimientos.
   luego abona. El colchón meta lo fija el usuario (`agent_goals.emergency_fund_min`)
   o es un mes de gastos y cuotas. La lógica vive en `src/utils/payrollAdvisor.ts`
   y la pantalla "Asesor de nómina" de Estrategia la usa en vivo.
+- **Capa 5 (detector que aprende):** un clasificador bayesiano ingenuo (Naive
+  Bayes) con las palabras del concepto y el rango del monto, con suavizado de
+  Lidstone (0,1). Parte de ~36 ejemplos semilla (peso 1); los gastos del
+  usuario pesan 2 y sus correcciones (`agent_feedback`) pesan 3. Tiene las
+  cuatro partes de un agente que aprende:
+  - *elemento de desempeño:* en la app sugiere categoría y si es hormiga
+    mientras se escribe el concepto;
+  - *crítico:* al guardar se registra si la sugerencia se aceptó o se corrigió,
+    y se mide el porcentaje de aciertos (total y últimas 10);
+  - *elemento de aprendizaje:* cada noche el agente se reentrena con todo;
+  - *generador de problemas:* señala gastos recientes no marcados que parecen
+    hormiga (evaluados con un modelo que no los usó para entrenar).
+  Además pronostica el gasto hormiga del mes (ritmo diario × días del mes) y
+  avisa desde el día 7 si supera el 5 % del ingreso (alerta por correo desde el
+  10 %). La lógica vive en `src/utils/antLearner.ts`; la tarjeta "Detector que
+  aprende" está en Gastos.
 - **Sin pisarse con la app:** `finance_settings.state_version` sube con cada
   guardado. La app guarda indicando la versión que cargó y el agente aplica sus
   cambios con `agent_apply_cycle` solo si nadie guardó desde que leyó. Si hay
@@ -112,6 +129,7 @@ supabase/
       agents/cycle.ts       capa 2
       agents/planner.ts     capa 3 (usa finance/debtPlanner.ts)
       agents/payroll.ts     capa 4 (usa finance/payrollAdvisor.ts)
+      agents/antLearner.ts  capa 5 (usa finance/antLearner.ts)
       supabaseStore.ts      lectura y escritura en Postgres
       notify.ts             correos con Resend
       zone.ts               fechas en la zona de Bogotá
@@ -190,7 +208,7 @@ quieres correr Supabase completo en tu computador.
 ## Pruebas
 
 ```bash
-npm run agent:test     # 59 pruebas: las 4 capas, fechas y orquestador
+npm run agent:test     # 70 pruebas: las 5 capas, fechas y orquestador
 npm run agent:check    # revisión de tipos de la función
 ```
 

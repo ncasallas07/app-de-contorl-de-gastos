@@ -36,6 +36,9 @@ import { AiChatDock } from './components/AiChatDock';
 import { AgentInbox } from './components/AgentInbox';
 import { DebtFreePlan } from './components/DebtFreePlan';
 import { PayrollAdvisor } from './components/PayrollAdvisor';
+import { AntLearnerCard } from './components/AntLearnerCard';
+import { loadFeedback, saveFeedback } from './services/learnerRepository';
+import { type FeedbackRecord, predictExpense, trainAntModel } from './utils/antLearner';
 
 const LEGACY_SEED_DEBT_IDS = new Set(['debt-1', 'debt-2', 'debt-3', 'debt-4']);
 const LEGACY_SEED_EXPENSE_IDS = new Set([
@@ -287,6 +290,29 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
     setCloudStatus('loading');
     setHydrationAttempt((attempt) => attempt + 1);
   };
+
+  // Capa 5: el detector se entrena con los gastos y las correcciones del usuario.
+  const [feedback, setFeedback] = useState<FeedbackRecord[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void loadFeedback().then((rows) => {
+      if (!cancelled) setFeedback(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, hydrationAttempt]);
+
+  const antModel = useMemo(() => trainAntModel(expenses, feedback), [expenses, feedback]);
+  const suggestExpense = useCallback(
+    (title: string, amount?: number) => predictExpense(antModel, title, amount),
+    [antModel]
+  );
+  const handleExpenseFeedback = useCallback((row: FeedbackRecord) => {
+    const stamped = { ...row, createdAt: new Date().toISOString() };
+    setFeedback((prev) => [stamped, ...prev]);
+    void saveFeedback(userId, row).catch(() => undefined);
+  }, [userId]);
 
   const strategyReport = useMemo(() => {
     return strategyEngine.calculateStrategy(salary, debts, expenses, strategyMode);
@@ -756,6 +782,12 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
                 antSummary={strategyReport.antExpenseSummary}
                 onOpenExpenseModal={() => { setPrefilledDateForExpense(undefined); setIsExpenseModalOpen(true); }}
               />
+              <AntLearnerCard
+                model={antModel}
+                feedback={feedback}
+                expenses={expenses}
+                salary={salary}
+              />
               <ExpenseListView
                 expenses={expenses}
                 onOpenAddModal={() => { setPrefilledDateForExpense(undefined); setIsExpenseModalOpen(true); }}
@@ -815,6 +847,8 @@ const FinanceApp: React.FC<FinanceAppProps> = ({ userId, userEmail, displayName,
         initialDate={prefilledDateForExpense}
         onClose={() => { setIsExpenseModalOpen(false); setPrefilledDateForExpense(undefined); }}
         onAdd={handleAddExpense}
+        suggest={suggestExpense}
+        onFeedback={handleExpenseFeedback}
       />
 
       <AddDebtModal

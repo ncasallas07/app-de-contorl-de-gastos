@@ -47,7 +47,8 @@ Aplicación web responsiva creada con **React 19 + TypeScript + Vite** y basada 
 - Capa 2, agente basado en modelo: suma la nómina al balance el día de pago y renueva las cuotas ya pagadas.
 - Capa 3, agente basado en objetivos: plan para quedar sin deudas en N meses, con simulación real de intereses.
 - Capa 4, agente basado en utilidad: el día de pago recomienda cómo repartir el excedente entre deuda y colchón.
-- Bandeja "Lo que hizo tu agente" en el Resumen y pantallas "Plan sin deudas" y "Asesor de nómina" en Estrategia.
+- Capa 5, agente que aprende: clasificador Naive Bayes que sugiere categoría y gastos hormiga, aprende de tus correcciones y pronostica el mes.
+- Bandeja "Lo que hizo tu agente" en el Resumen y pantallas "Plan sin deudas" y "Asesor de nómina" en Estrategia y "Detector que aprende" en Gastos.
 - Instalación, arquitectura y pruebas en [`supabase/functions/README.md`](supabase/functions/README.md).
 
 ---

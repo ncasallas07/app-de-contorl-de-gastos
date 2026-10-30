@@ -1,4 +1,4 @@
-import { deepStrictEqual as assertEquals } from 'node:assert/strict';
+import { deepStrictEqual as assertEquals, ok } from 'node:assert/strict';
 import type { DebtRecord, SalaryProfile } from '../_shared/finance/finance.ts';
 import type { AgentAction, StoredAction } from '../_shared/agentTypes.ts';
 import {
@@ -109,6 +109,7 @@ const user = (overrides: Partial<UserState> = {}): MemoryUser => ({
     debts: [{ ...debt }],
     workDays: [],
     expenses: [],
+    feedback: [],
     strategyMode: 'avalancha',
     goal: null,
     stateVersion: 1,
@@ -158,7 +159,7 @@ Deno.test('si la app guardó mientras el agente pensaba, no pisa nada y lo reint
   assertEquals(result.balanceDelta, 0);
   assertEquals(memory.users.ana.state.salary.currentBalance, 500_000);
   assertEquals(memory.users.ana.state.lastPaymentApplied, '2026-11-14');
-  assertEquals(memory.runs[0].layers, ['ciclo:conflicto', 'planificador', 'vigilante']);
+  assertEquals(memory.runs[0].layers, ['ciclo:conflicto', 'planificador', 'aprendizaje', 'vigilante']);
   assertEquals(memory.actions.some((action) => action.kind === 'pago_aplicado'), false);
 
   // Al día siguiente, sin conflicto, el pago del 15 sí se aplica.
@@ -213,7 +214,9 @@ Deno.test('capa 3: guarda el plan y solo avisa de nuevo cuando el plan cambia', 
 
   // El usuario acorta la meta a 3 meses: ya no cabe en su capacidad → aviso nuevo por correo.
   memory.users.ana.state.goal = { targetMonths: 3, active: true, emergencyFundMin: 0 };
-  memory.users.ana.state.expenses = [{ date: '2026-11-01', amount: 2_000_000 }];
+  memory.users.ana.state.expenses = [
+    { id: 'e1', date: '2026-11-01', amount: 2_000_000, title: 'Arriendo', category: 'vivienda', isAntExpense: false },
+  ];
   await runAgent('2026-11-03', memory.store, okSender);
   const latest = memory.actions.filter((action) => action.layer === 3).at(-1);
   assertEquals(latest?.kind, 'meta_inalcanzable');
@@ -232,7 +235,7 @@ Deno.test('capa 4: el día de pago recomienda cómo repartirlo y lo envía por c
 
   const [result] = await runAgent('2026-11-15', memory.store, okSender);
 
-  assertEquals(memory.runs[0].layers, ['ciclo', 'planificador', 'asesor', 'vigilante']);
+  assertEquals(memory.runs[0].layers, ['ciclo', 'planificador', 'asesor', 'aprendizaje', 'vigilante']);
   assertEquals(result.balanceDelta, 1_500_000);
   const advice = memory.actions.find((action) => action.layer === 4);
   assertEquals(advice?.kind, 'reparto_nomina');
@@ -247,4 +250,36 @@ Deno.test('capa 4: en un día sin pago no se activa', async () => {
   await runAgent('2026-11-16', memory.store, okSender);
   assertEquals(memory.runs[0].layers.includes('asesor'), false);
   assertEquals(memory.actions.some((action) => action.layer === 4), false);
+});
+
+Deno.test('capa 5: pronostica los gastos hormiga del mes y señala los no marcados', async () => {
+  const ant = (id: string, date: string, amount: number, isAntExpense = true) => ({
+    id, date, amount, title: 'Tinto y empanada', category: 'cafe_snacks' as const, isAntExpense,
+  });
+  const memory = memoryStore({
+    ana: user({
+      expenses: [
+        ant('a', '2026-11-02', 60_000),
+        ant('b', '2026-11-05', 90_000),
+        ant('c', '2026-11-08', 9_000, false),
+      ],
+    }),
+  });
+
+  await runAgent('2026-11-10', memory.store, okSender);
+
+  const forecast = memory.actions.find((action) => action.kind === 'pronostico_hormiga');
+  // Marcados: 150.000 en 10 días → 450.000 en noviembre (30 días), 15 % del ingreso → alerta alta.
+  assertEquals(forecast?.severity, 'alta');
+  assertEquals((forecast!.data as { projected: number }).projected, 450_000);
+  assertEquals(forecast?.emailed, true);
+  const suspect = memory.actions.find((action) => action.kind === 'posible_hormiga');
+  ok(suspect, 'debería señalar el gasto no marcado');
+  assertEquals((suspect.data as { expenses: { id: string }[] }).expenses.map((item) => item.id), ['c']);
+
+  // Al día siguiente no repite la misma alerta.
+  const before = memory.actions.length;
+  await runAgent('2026-11-11', memory.store, okSender);
+  assertEquals(memory.actions.filter((action) => action.kind === 'pronostico_hormiga').length, 1);
+  ok(memory.actions.length >= before);
 });

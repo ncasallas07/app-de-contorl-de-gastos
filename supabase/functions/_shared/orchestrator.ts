@@ -2,8 +2,8 @@
 //
 //   Percibir → 2. Modelo (ciclo) → 3. Objetivos (planificador)
 //            → 4. Utilidad (asesor, solo el día de pago)
+//            → 5. Aprendizaje (detector de gastos hormiga)
 //            → 1. Reactivo (vigilante) → Actuar
-//   5. Aprendizaje (hormiga)       ← versión completa
 //
 // Primero el agente actualiza su modelo del mundo (pagos, cuotas renovadas),
 // luego replanifica hacia su meta con ese estado y al final las reglas
@@ -14,7 +14,6 @@
 
 import type {
   DebtRecord,
-  ExpenseRecord,
   SalaryProfile,
   StrategyMethod,
   WorkDayRecord,
@@ -25,6 +24,8 @@ import { runWatcher } from './agents/watcher.ts';
 import { applyDebtUpdates, type DebtUpdate, runCycle } from './agents/cycle.ts';
 import { DEFAULT_TARGET_MONTHS, type Goal, runPlanner, STORED_PLAN_MONTHS } from './agents/planner.ts';
 import { runPayroll } from './agents/payroll.ts';
+import { type LearnerExpense, runAntLearner } from './agents/antLearner.ts';
+import type { FeedbackRecord } from './finance/antLearner.ts';
 import { buildDebtPlan } from './finance/debtPlanner.ts';
 import { buildAlertEmail, type EmailSender } from './notify.ts';
 
@@ -33,7 +34,9 @@ export interface UserState {
   salary: SalaryProfile;
   debts: DebtRecord[];
   workDays: WorkDayRecord[];
-  expenses: Pick<ExpenseRecord, 'date' | 'amount'>[];
+  expenses: LearnerExpense[];
+  /** Correcciones del usuario a las sugerencias del detector (capa 5). */
+  feedback: FeedbackRecord[];
   strategyMode: StrategyMethod;
   goal: Goal | null;
   stateVersion: number;
@@ -163,6 +166,15 @@ export async function runAgentForUser(
         emergencyFundMin: state.goal?.emergencyFundMin ?? null,
       }).actions);
     }
+
+    // Capa 5: agente que aprende.
+    layers.push('aprendizaje');
+    decided.push(...runAntLearner({
+      salary: state.salary,
+      expenses: state.expenses,
+      feedback: state.feedback,
+      todayIso,
+    }));
 
     // Capa 1: reactivo simple, sobre el estado ya actualizado.
     layers.push('vigilante');

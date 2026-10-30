@@ -2,7 +2,13 @@
 // Usa el cliente con service_role: solo existe dentro de la Edge Function.
 
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import type { DebtRecord, SalaryProfile, StrategyMethod, WorkDayRecord } from './finance/finance.ts';
+import type {
+  DebtRecord,
+  ExpenseCategory,
+  SalaryProfile,
+  StrategyMethod,
+  WorkDayRecord,
+} from './finance/finance.ts';
 import type { StoredAction } from './agentTypes.ts';
 import type { AgentStore, RunLog, UserState } from './orchestrator.ts';
 
@@ -63,6 +69,24 @@ interface WorkDayRow {
   daily_earnings: number | string | null;
 }
 
+interface ExpenseRow {
+  id: string;
+  date: string;
+  amount: number | string;
+  title: string;
+  category: ExpenseCategory;
+  is_ant_expense: boolean;
+}
+
+interface FeedbackRow {
+  concept: string;
+  suggested_category: ExpenseCategory | null;
+  final_category: ExpenseCategory;
+  suggested_ant: boolean | null;
+  final_ant: boolean;
+  created_at: string;
+}
+
 export function mapSettingsRow(row: SettingsRow): SalaryProfile {
   return {
     contractType: row.contract_type,
@@ -104,7 +128,7 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
 
     async loadUserState(userId): Promise<UserState> {
       const since = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
-      const [settings, debts, workDays, agentState, expenses, goal] = await Promise.all([
+      const [settings, debts, workDays, agentState, expenses, goal, feedback] = await Promise.all([
         client.from('finance_settings')
           .select('contract_type, pay_mode, daily_rate, hourly_rate, work_days_per_week, payment_weekday, default_shift, hours_per_shift, monthly_salary, payment_period, payment_day_of_month, work_days_per_month_target, current_balance, strategy_mode, state_version')
           .eq('user_id', userId)
@@ -121,18 +145,23 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
           .select('last_payment_applied')
           .eq('user_id', userId)
           .maybeSingle(),
-        // Para estimar el gasto mensual (capa 3).
+        // Gasto mensual (capa 3) y entrenamiento del detector (capa 5).
         client.from('expenses')
-          .select('date, amount')
+          .select('id, date, amount, title, category, is_ant_expense')
           .eq('user_id', userId)
           .gte('date', since),
         client.from('agent_goals')
           .select('target_months, active, emergency_fund_min')
           .eq('user_id', userId)
           .maybeSingle(),
+        client.from('agent_feedback')
+          .select('concept, suggested_category, final_category, suggested_ant, final_ant, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(500),
       ]);
 
-      const failed = [settings, debts, workDays, agentState, expenses, goal].find((result) => result.error);
+      const failed = [settings, debts, workDays, agentState, expenses, goal, feedback].find((result) => result.error);
       if (failed?.error) throw new Error(`No se pudieron leer los datos: ${failed.error.message}`);
 
       const settingsRow = settings.data as SettingsRow;
@@ -140,9 +169,21 @@ export function createSupabaseStore(client: SupabaseClient): AgentStore {
         salary: mapSettingsRow(settingsRow),
         debts: (debts.data ?? []).map((row) => mapDebtRow(row as DebtRow)),
         workDays: (workDays.data ?? []).map((row) => mapWorkDayRow(row as WorkDayRow)),
-        expenses: (expenses.data ?? []).map((row: { date: string; amount: number | string }) => ({
+        expenses: (expenses.data ?? []).map((row: ExpenseRow) => ({
+          id: row.id,
           date: row.date,
           amount: num(row.amount),
+          title: row.title,
+          category: row.category,
+          isAntExpense: row.is_ant_expense,
+        })),
+        feedback: (feedback.data ?? []).map((row: FeedbackRow) => ({
+          concept: row.concept,
+          suggestedCategory: row.suggested_category,
+          finalCategory: row.final_category,
+          suggestedAnt: row.suggested_ant,
+          finalAnt: row.final_ant,
+          createdAt: row.created_at,
         })),
         strategyMode: settingsRow.strategy_mode === 'bola_de_nieve' ? 'bola_de_nieve' : 'avalancha',
         goal: goal.data
