@@ -47,13 +47,16 @@ así que se crea una por banco.
 1. Abre **Atajos > Automatización > Nueva automatización > Mensaje**.
 2. *El mensaje contiene:* `NEQUI`. Elige **Ejecutar inmediatamente** (sin
    preguntar) y toca **Siguiente**.
-3. Agrega la acción **Obtener contenido de URL**:
-   - *URL:* la dirección de arriba.
+3. Agrega la acción **Obtener contenido de URL** y pega la dirección.
+   Toca la flecha **›** (o *Mostrar más*) junto a la URL: el método, los
+   encabezados y el cuerpo están ocultos hasta que la abres. Si no la abres,
+   Atajos envía un GET sin datos y la función responde 405.
    - *Método:* `POST`.
-   - *Encabezados:* `x-finsmart-token` = tu token.
-   - *Cuerpo de la solicitud:* **JSON** con dos campos de texto:
+   - *Cuerpo de la solicitud:* **JSON** (o *Formulario*, también funciona) con
+     tres campos de texto:
      - `text` = variable **Entrada del atajo**; tócala y elige **Contenido**.
      - `source` = `sms`
+     - `token` = tu token (así no hace falta configurar encabezados).
 4. Guarda. Repite para `DaviPlata`.
 
 Nota: el aviso de Daviplata "Recibiste $30,000…" no trae la palabra DaviPlata,

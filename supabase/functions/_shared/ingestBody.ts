@@ -28,9 +28,32 @@ export function extractToken(headers: Headers, body: IngestBody): { token: strin
 
 export async function readIngestBody(request: Request): Promise<IngestBody> {
   const url = new URL(request.url);
-  const raw = await request.text();
   const fromUrl = { sender: url.searchParams.get('sender'), source: url.searchParams.get('source') };
-  if ((request.headers.get('content-type') ?? '').includes('application/json')) {
+  const type = (request.headers.get('content-type') ?? '').toLowerCase();
+
+  // Formulario (Atajos con "Cuerpo: Formulario", o apps que envían campos).
+  if (type.includes('multipart/form-data') || type.includes('application/x-www-form-urlencoded')) {
+    try {
+      const form = await request.formData();
+      const field = (name: string) => {
+        const value = form.get(name);
+        return typeof value === 'string' ? value : undefined;
+      };
+      return {
+        ...fromUrl,
+        ...Object.fromEntries(
+          (['text', 'sender', 'source', 'token'] as const)
+            .map((name) => [name, field(name)])
+            .filter(([, value]) => value !== undefined),
+        ),
+      };
+    } catch {
+      return fromUrl;
+    }
+  }
+
+  const raw = await request.text();
+  if (type.includes('application/json')) {
     try {
       return { ...fromUrl, ...JSON.parse(raw) as IngestBody };
     } catch {
@@ -39,4 +62,3 @@ export async function readIngestBody(request: Request): Promise<IngestBody> {
   }
   return { ...fromUrl, text: raw };
 }
-

@@ -179,3 +179,22 @@ Deno.test('token: encabezado, Bearer o JSON; tolera espacios y saltos de línea 
   assertEquals(extractToken(h({}), {}), { problem: 'falta' });
   assertEquals(extractToken(h({ 'x-finsmart-token': token.slice(0, 40) }), {}), { problem: 'formato' });
 });
+
+Deno.test('cuerpo: formulario de Atajos (multipart y urlencoded) con el token', async () => {
+  const { readIngestBody, extractToken } = await import('../_shared/ingestBody.ts');
+  const token = `fs_${'b2'.repeat(32)}`;
+  const form = new FormData();
+  form.set('text', 'NEQUI: Pagaste 1.000,00 en PRUEBA FINSMART');
+  form.set('token', token);
+  form.set('source', 'sms');
+  const multipart = await readIngestBody(new Request('https://x.co/f', { method: 'POST', body: form }));
+  assertEquals([multipart.text, multipart.source], ['NEQUI: Pagaste 1.000,00 en PRUEBA FINSMART', 'sms']);
+  assertEquals(extractToken(new Headers(), multipart), { token });
+
+  const encoded = await readIngestBody(new Request('https://x.co/f', {
+    method: 'POST',
+    body: new URLSearchParams({ text: 'tinto 3500', token }),
+  }));
+  assertEquals(encoded.text, 'tinto 3500');
+  assertEquals(extractToken(new Headers(), encoded), { token });
+});
