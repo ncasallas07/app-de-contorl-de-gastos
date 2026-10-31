@@ -1,7 +1,7 @@
 {
   "tasks": {
     "test": "deno test --allow-env tests/",
-    "check": "deno check agent-run/index.ts telegram-bot/index.ts",
+    "check": "deno check agent-run/index.ts telegram-bot/index.ts bank-ingest/index.ts",
     "lint": "deno lint"
   },
   "lint": {

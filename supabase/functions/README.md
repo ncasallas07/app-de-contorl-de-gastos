@@ -121,10 +121,12 @@ supabase/
   agent.sql                 tablas del agente y seguridad (RLS)
   agent_cron.sql            secreto en Vault y ejecución diaria
   telegram.sql              vinculación con Telegram y secreto del webhook
+  banks.sql                 avisos de los bancos, token de los celulares
   functions/
     deno.json               tareas de Deno (test, check, lint)
     agent-run/index.ts      punto de entrada (Edge Function)
     telegram-bot/index.ts   bot de Telegram (webhook y administración)
+    bank-ingest/index.ts    recibe los avisos de los bancos (SMS y correo)
     _shared/
       orchestrator.ts       ejecuta las capas en orden
       agents/watcher.ts     capa 1
@@ -138,6 +140,9 @@ supabase/
       telegramBot.ts        respuestas del bot (comandos y botones)
       botViews.ts           textos del bot: resumen, deudas, plan y gastos
       auth.ts               verificación del secreto del cron
+      banks.ts              lectores de avisos: Nequi, Daviplata, Nu, Davivienda
+      bankIngest.ts         del aviso a la acción (borrador, ingreso, rechazo)
+      draftStore.ts         borradores de gastos en Postgres
       zone.ts               fechas en la zona de Bogotá
       agentTypes.ts         tipos comunes
       finance/              copia generada de la lógica de la app
@@ -255,10 +260,36 @@ quieres correr Supabase completo en tu computador.
    El bot solo responde en chats privados y a cuentas vinculadas; Telegram
    firma cada mensaje con un secreto que vive en Vault.
 
+8. **Avisos de los bancos.** Ejecuta completos `supabase/telegram.sql` y luego
+   `supabase/banks.sql` en el SQL Editor, y despliega:
+
+   ```bash
+   npx supabase functions deploy bank-ingest --no-verify-jwt --use-api
+   ```
+
+   Qué hace con cada aviso:
+
+   | Aviso | Ejemplo | Qué hace el agente |
+   |---|---|---|
+   | Compra o envío | `NEQUI: Pagaste 3.900,00 en GOOGLE *Google One` | propone el gasto en Telegram con la categoría sugerida (capa 5) |
+   | Ingreso | `DaviPlata: Recibiste plata por BreB por valor de $18,000` | pregunta si lo suma al saldo (la nómina ya la suma la capa 2) |
+   | Cobro rechazado | `Faltan fondos para pagar $7.671,00 en GOPASS.` | avisa sin registrar gasto; si el mismo comercio falla 2 veces en 30 días, alerta de suscripción olvidada |
+   | Código de seguridad | `Tu codigo es 482913` | lo descarta sin guardarlo |
+
+   Si el mismo aviso llega al iPhone y al Android en menos de 10 minutos, se
+   registra una sola vez. Para probar sin celular:
+
+   ```sql
+   select public.bank_test('tu@correo.com', 'NEQUI: Pagaste 3.900,00 en GOOGLE *Google One');
+   ```
+
+   Los celulares se identifican con un token personal (`fs_...`) que se genera
+   en la app; en la base de datos solo se guarda su huella SHA-256.
+
 ## Pruebas
 
 ```bash
-npm run agent:test     # 92 pruebas: las 5 capas, fechas, orquestador y bot de Telegram
+npm run agent:test     # 108 pruebas: las 5 capas, orquestador, bot y avisos de bancos
 npm run agent:check    # revisión de tipos de la función
 ```
 

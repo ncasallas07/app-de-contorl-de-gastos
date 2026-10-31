@@ -163,6 +163,9 @@ create table if not exists public.telegram_drafts (
   created_at timestamptz not null default now()
 );
 
+-- Sesión 3: banco del aviso que originó el borrador (null = escrito a mano).
+alter table public.telegram_drafts add column if not exists source text;
+
 create index if not exists telegram_drafts_user_idx on public.telegram_drafts (user_id, created_at);
 
 alter table public.telegram_drafts enable row level security;
@@ -214,7 +217,7 @@ begin
       when 'transporte' then 'transporte_evitable'
       when 'compras_impulso' then 'antojo_impulso'
       else 'otro_hormiga' end end,
-    'Registrado desde Telegram'
+    coalesce('Aviso de ' || v_draft.source, 'Registrado desde Telegram')
   );
 
   insert into public.agent_feedback (user_id, concept, suggested_category, final_category, suggested_ant, final_ant)

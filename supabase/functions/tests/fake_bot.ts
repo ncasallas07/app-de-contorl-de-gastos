@@ -68,6 +68,7 @@ export function fakeBot(today = '2026-10-30') {
   const replies: Sent[] = [];
   const edits: Sent[] = [];
   const answers: (string | undefined)[] = [];
+  const incomes = new Map<number, { userId: string; amount: number; status: string }>();
   let nextDraft = 1;
   let nextExpense = 1;
 
@@ -142,6 +143,20 @@ export function fakeBot(today = '2026-10-30') {
       return Promise.resolve(state.salary.currentBalance);
     },
     newExpenseId: () => `tg-test-${nextExpense++}`,
+    addIncome: (userId, eventId) => {
+      const income = incomes.get(eventId);
+      if (!income || income.userId !== userId || income.status !== 'nuevo') return Promise.resolve(null);
+      income.status = 'sumado';
+      const state = states.get(userId)!;
+      state.salary.currentBalance += income.amount;
+      return Promise.resolve(state.salary.currentBalance);
+    },
+    dismissIncome: (userId, eventId) => {
+      const income = incomes.get(eventId);
+      if (!income || income.userId !== userId || income.status !== 'nuevo') return Promise.resolve(false);
+      income.status = 'ignorado';
+      return Promise.resolve(true);
+    },
   };
 
   const say = (chatId: number, text: string, type = 'private') =>
@@ -152,5 +167,5 @@ export function fakeBot(today = '2026-10-30') {
       callback_query: { id: 'cb', data, message: { message_id: messageId, chat: { id: chatId, type: 'private' } } },
     } as TelegramUpdate, deps);
 
-  return { deps, links, states, drafts, feedback, replies, edits, answers, say, tap };
+  return { deps, links, states, drafts, feedback, replies, edits, answers, incomes, say, tap };
 }

@@ -75,6 +75,10 @@ export interface BotDeps {
   /** Deshace un gasto creado desde Telegram. Devuelve el saldo nuevo o null. */
   undoExpense(userId: string, expenseId: string): Promise<number | null>;
   newExpenseId(): string;
+  /** Suma al saldo un ingreso avisado por el banco. Devuelve el saldo nuevo o null si ya se decidió. */
+  addIncome(userId: string, eventId: number): Promise<number | null>;
+  /** Marca un ingreso como "no sumar". false si ya se había decidido. */
+  dismissIncome(userId: string, eventId: number): Promise<boolean>;
 }
 
 const CODE = /^[A-Z0-9]{8}$/;
@@ -194,27 +198,32 @@ async function proposeExpense(chatId: number, userId: string, text: string, deps
     return;
   }
 
-  const state = await deps.loadState(userId);
-  const prediction = predictExpense(trainAntModel(state.expenses, state.feedback), parsed.title, parsed.amount);
+  const draft = suggestDraft(await deps.loadState(userId), parsed.title, parsed.amount, null);
+  const id = await deps.createDraft(userId, draft);
+  await deps.reply(chatId, formatDraft({ ...draft, id }), draftKeyboard({ id, isAnt: draft.isAnt }));
+}
+
+/** Borrador con la categoría y el "¿es hormiga?" que sugiere el detector (capa 5). */
+export function suggestDraft(state: UserState, title: string, amount: number, source: string | null): Omit<StoredDraft, 'id'> {
+  const prediction = predictExpense(trainAntModel(state.expenses, state.feedback), title, amount);
   const category = prediction?.category ?? 'otros';
   const isAnt = prediction?.isAnt ?? false;
-  const draft: Omit<StoredDraft, 'id'> = {
-    title: parsed.title,
-    amount: parsed.amount,
+  return {
+    title,
+    amount,
     category,
     isAnt,
     confidence: prediction && prediction.knownTokens > 0 ? prediction.categoryConfidence : null,
     edited: false,
     suggestedCategory: category,
     suggestedAnt: isAnt,
+    source,
   };
-  const id = await deps.createDraft(userId, draft);
-  await deps.reply(chatId, formatDraft({ ...draft, id }), draftKeyboard({ id, isAnt }));
 }
 
 async function handleCallback(query: NonNullable<TelegramUpdate['callback_query']>, deps: BotDeps) {
   const message = query.message;
-  const match = /^([sacbkxu]):([\w-]{1,40})(?::(\d{1,2}))?$/.exec(query.data ?? '');
+  const match = /^([sacbkxuin]):([\w-]{1,40})(?::(\d{1,2}))?$/.exec(query.data ?? '');
   if (!message || message.chat.type !== 'private' || !match) {
     await deps.answer(query.id);
     return;
@@ -239,6 +248,26 @@ async function handleCallback(query: NonNullable<TelegramUpdate['callback_query'
     }
     await deps.answer(query.id, 'Gasto deshecho');
     await deps.edit(chatId, messageId, `↩ <b>Gasto deshecho.</b>\nSaldo en cuenta: ${formatCOP(balance)}`);
+    return;
+  }
+
+  if (action === 'i' || action === 'n') {
+    const eventId = Number(id);
+    if (!Number.isSafeInteger(eventId)) {
+      await deps.answer(query.id);
+      return;
+    }
+    if (action === 'i') {
+      const balance = await deps.addIncome(userId, eventId);
+      await deps.answer(query.id, balance === null ? 'Ya lo habías decidido.' : 'Sumado');
+      if (balance !== null) {
+        await deps.edit(chatId, messageId, `➕ <b>Ingreso sumado.</b>\nSaldo en cuenta: ${formatCOP(balance)}`);
+      }
+    } else {
+      const done = await deps.dismissIncome(userId, eventId);
+      await deps.answer(query.id, done ? 'Listo' : 'Ya lo habías decidido.');
+      if (done) await deps.edit(chatId, messageId, '<i>Listo, no lo sumé a tu saldo.</i>');
+    }
     return;
   }
 

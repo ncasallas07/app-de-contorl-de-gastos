@@ -16,39 +16,11 @@ import {
   type BotDeps,
   handleUpdate,
   type LinkResult,
-  type StoredDraft,
   type TelegramUpdate,
 } from '../_shared/telegramBot.ts';
 import { createSupabaseStore } from '../_shared/supabaseStore.ts';
 import { todayInZone } from '../_shared/zone.ts';
-import type { ExpenseCategory } from '../_shared/finance/finance.ts';
-
-interface DraftRow {
-  id: string;
-  title: string;
-  amount: number | string;
-  category: ExpenseCategory;
-  is_ant: boolean;
-  suggested_category: ExpenseCategory;
-  suggested_ant: boolean;
-  confidence: number | string | null;
-  edited: boolean;
-}
-
-const toDraft = (row: DraftRow): StoredDraft => ({
-  id: row.id,
-  title: row.title,
-  amount: Number(row.amount),
-  category: row.category,
-  isAnt: row.is_ant,
-  suggestedCategory: row.suggested_category,
-  suggestedAnt: row.suggested_ant,
-  confidence: row.confidence === null ? null : Number(row.confidence),
-  edited: row.edited,
-});
-
-const DRAFT_COLUMNS = 'id, title, amount, category, is_ant, suggested_category, suggested_ant, confidence, edited';
-const DRAFT_TTL_MS = 86_400_000;
+import { createDraftStore } from '../_shared/draftStore.ts';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -86,42 +58,7 @@ function botDeps(client: SupabaseClient, telegram: TelegramApi): BotDeps {
     today: () => todayInZone(),
     loadState: (userId) => createSupabaseStore(client).loadUserState(userId),
 
-    async createDraft(userId, draft) {
-      // De paso se limpian los borradores viejos de esta persona.
-      await client.from('telegram_drafts').delete().eq('user_id', userId)
-        .lt('created_at', new Date(Date.now() - DRAFT_TTL_MS).toISOString());
-      const { data, error } = await client.from('telegram_drafts').insert({
-        user_id: userId,
-        title: draft.title,
-        amount: draft.amount,
-        category: draft.category,
-        is_ant: draft.isAnt,
-        suggested_category: draft.suggestedCategory,
-        suggested_ant: draft.suggestedAnt,
-        confidence: draft.confidence,
-        edited: draft.edited,
-      }).select('id').single();
-      if (error) throw new Error(`No se pudo crear el borrador: ${error.message}`);
-      return data.id as string;
-    },
-    async getDraft(userId, draftId) {
-      const { data } = await client.from('telegram_drafts').select(DRAFT_COLUMNS)
-        .eq('user_id', userId).eq('id', draftId)
-        .gt('created_at', new Date(Date.now() - DRAFT_TTL_MS).toISOString())
-        .maybeSingle<DraftRow>();
-      return data ? toDraft(data) : null;
-    },
-    async updateDraft(userId, draftId, patch) {
-      const row: Record<string, unknown> = {};
-      if (patch.category !== undefined) row.category = patch.category;
-      if (patch.isAnt !== undefined) row.is_ant = patch.isAnt;
-      if (patch.edited !== undefined) row.edited = patch.edited;
-      const { error } = await client.from('telegram_drafts').update(row).eq('user_id', userId).eq('id', draftId);
-      if (error) throw new Error(`No se pudo actualizar el borrador: ${error.message}`);
-    },
-    async deleteDraft(userId, draftId) {
-      await client.from('telegram_drafts').delete().eq('user_id', userId).eq('id', draftId);
-    },
+    ...createDraftStore(client),
     async saveDraft(userId, draftId, expenseId, date) {
       const { data, error } = await client.rpc('telegram_save_draft', {
         p_user_id: userId,
@@ -149,6 +86,16 @@ function botDeps(client: SupabaseClient, telegram: TelegramApi): BotDeps {
       return data === null ? null : Number(data);
     },
     newExpenseId: () => `tg-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`,
+    async addIncome(userId, eventId) {
+      const { data, error } = await client.rpc('bank_add_income', { p_user_id: userId, p_event_id: eventId });
+      if (error) throw new Error(`No se pudo sumar el ingreso: ${error.message}`);
+      return data === null ? null : Number(data);
+    },
+    async dismissIncome(userId, eventId) {
+      const { data, error } = await client.rpc('bank_dismiss_income', { p_user_id: userId, p_event_id: eventId });
+      if (error) throw new Error(`No se pudo actualizar el ingreso: ${error.message}`);
+      return data === true;
+    },
   };
 }
 

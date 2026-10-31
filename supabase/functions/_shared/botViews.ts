@@ -226,6 +226,8 @@ export interface Draft {
   confidence: number | null;
   /** true si la persona ya cambió algo: deja de mostrarse como sugerencia. */
   edited: boolean;
+  /** Banco del aviso (p. ej. "Nequi"), o null si la persona lo escribió. */
+  source?: string | null;
 }
 
 export interface Button {
@@ -236,7 +238,7 @@ export type Keyboard = Button[][];
 
 export function formatDraft(draft: Draft): string {
   const lines = [
-    '<b>Nuevo gasto</b>',
+    draft.source ? `<b>${escapeHtml(draft.source)} · ¿registro este gasto?</b>` : '<b>Nuevo gasto</b>',
     `Concepto: ${escapeHtml(draft.title)}`,
     `Monto: <b>${formatCOP(draft.amount)}</b>`,
     `Categoría: ${CATEGORY_LABELS[draft.category]}`,
@@ -297,3 +299,41 @@ export function formatSaved(saved: SavedExpense): string {
 export const savedKeyboard = (expenseId: string): Keyboard => [
   [{ text: '↩ Deshacer', callback_data: `u:${expenseId}` }],
 ];
+
+// ---------- Avisos de los bancos ----------
+
+export interface IncomeNotice {
+  bank: string;
+  amount: number;
+  from: string | null;
+}
+
+export function formatIncome(notice: IncomeNotice): string {
+  const lines = [`<b>${escapeHtml(notice.bank)} · recibiste ${formatCOP(notice.amount)}</b>`];
+  if (notice.from) lines.push(`De: ${escapeHtml(notice.from)}`);
+  lines.push(
+    '',
+    '¿Lo sumo a tu saldo en FinSmart?',
+    '<i>Si es tu nómina, no la sumes: el agente ya la suma solo el día de pago.</i>',
+  );
+  return lines.join('\n');
+}
+
+export const incomeKeyboard = (eventId: number): Keyboard => [
+  [{ text: '➕ Sumar a mi saldo', callback_data: `i:${eventId}` }],
+  [{ text: 'No sumar (nómina o ya contado)', callback_data: `n:${eventId}` }],
+];
+
+export function formatRejected(bank: string, amount: number, merchant: string | null): string {
+  return `<b>${escapeHtml(bank)} rechazó un cobro</b>\n`
+    + `${formatCOP(amount)}${merchant ? ` en ${escapeHtml(merchant)}` : ''} por falta de fondos.\n`
+    + '<i>No lo registré como gasto porque no salió dinero.</i>';
+}
+
+export function formatRepeatedRejection(merchant: string, count: number, amount: number): { title: string; message: string } {
+  return {
+    title: `${merchant} intenta cobrarte y no pasa`,
+    message: `${merchant} intentó cobrarte ${formatCOP(amount)} ${count} veces en los últimos 30 días y el pago fue rechazado. `
+      + 'Si ya no usas esa suscripción, cancélala: cuando tengas saldo te la va a cobrar.',
+  };
+}
