@@ -166,3 +166,16 @@ Deno.test('cuerpo: texto plano de MacroDroid con remitente en la URL, y JSON de 
   }));
   ok(String(broken.text).includes('Pagaste 1.000,00'), 'un JSON roto se procesa como texto');
 });
+
+Deno.test('token: encabezado, Bearer o JSON; tolera espacios y saltos de línea al pegar', async () => {
+  const { extractToken } = await import('../_shared/ingestBody.ts');
+  const token = `fs_${'a1'.repeat(32)}`;
+  const h = (init: Record<string, string>) => new Headers(init);
+  assertEquals(extractToken(h({ 'x-finsmart-token': token }), {}), { token });
+  assertEquals(extractToken(h({ 'X-FinSmart-Token': ` ${token} ` }), {}), { token });
+  assertEquals(extractToken(h({ authorization: `Bearer ${token}` }), {}), { token });
+  assertEquals(extractToken(h({}), { token: `"${token}"` }), { token });
+  assertEquals(extractToken(h({}), { token: `${token}\u200B\n` }), { token });
+  assertEquals(extractToken(h({}), {}), { problem: 'falta' });
+  assertEquals(extractToken(h({ 'x-finsmart-token': token.slice(0, 40) }), {}), { problem: 'formato' });
+});

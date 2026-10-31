@@ -23,7 +23,7 @@ import { createDraftStore } from '../_shared/draftStore.ts';
 import { createSupabaseStore } from '../_shared/supabaseStore.ts';
 import { createTelegramApi } from '../_shared/telegram.ts';
 import { todayInZone } from '../_shared/zone.ts';
-import { type IngestBody as Body, readIngestBody as readBody } from '../_shared/ingestBody.ts';
+import { extractToken, type IngestBody as Body, readIngestBody as readBody } from '../_shared/ingestBody.ts';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -39,18 +39,30 @@ async function sha256(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function resolveUser(request: Request, body: Body, client: SupabaseClient): Promise<string | null> {
-  const token = request.headers.get('x-finsmart-token')
-    ?? request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
-  if (token.startsWith('fs_') && token.length >= 40) {
-    const { data, error } = await client.rpc('bank_user_for_token', { p_hash: await sha256(token) });
-    return !error && typeof data === 'string' ? data : null;
-  }
+type Who = { userId: string } | { error: string };
+
+async function resolveUser(request: Request, body: Body, client: SupabaseClient): Promise<Who> {
+  // Pruebas desde el SQL Editor.
   const secret = request.headers.get('x-agent-secret');
   if (secret && typeof body.userId === 'string' && UUID.test(body.userId) && await isAuthorized(secret, client)) {
-    return body.userId;
+    return { userId: body.userId };
   }
-  return null;
+
+  const found = extractToken(request.headers, body);
+  if ('problem' in found) {
+    console.log(`bank-ingest: token ${found.problem}`);
+    return {
+      error: found.problem === 'falta'
+        ? 'Falta el token: agrega el encabezado x-finsmart-token con el token de la app'
+        : 'El token está incompleto o mal copiado: debe empezar por fs_ y tener 67 caracteres',
+    };
+  }
+  const { data, error } = await client.rpc('bank_user_for_token', { p_hash: await sha256(found.token) });
+  if (error || typeof data !== 'string') {
+    console.log('bank-ingest: token no reconocido');
+    return { error: 'Token no reconocido: genera uno nuevo en la app y pégalo completo' };
+  }
+  return { userId: data };
 }
 
 function deps(client: SupabaseClient): IngestDeps {
@@ -92,7 +104,9 @@ function deps(client: SupabaseClient): IngestDeps {
 }
 
 Deno.serve(async (request) => {
-  if (request.method !== 'POST') return json({ error: 'Usa POST' }, 405);
+  if (request.method !== 'POST') {
+    return json({ error: 'Usa el método POST (en Atajos: Método POST; en MacroDroid: Método POST)' }, 405);
+  }
 
   const client = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -101,8 +115,9 @@ Deno.serve(async (request) => {
   );
 
   const body = await readBody(request);
-  const userId = await resolveUser(request, body, client);
-  if (!userId) return json({ error: 'No autorizado' }, 401);
+  const who = await resolveUser(request, body, client);
+  if ('error' in who) return json({ error: who.error }, 401);
+  const userId = who.userId;
 
   const text = typeof body.text === 'string' ? body.text.trim() : '';
   if (!text || text.length > 2000) return json({ error: 'Falta el texto del aviso (máximo 2000 caracteres)' }, 400);
