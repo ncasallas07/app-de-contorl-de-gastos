@@ -142,3 +142,27 @@ Deno.test('sin Telegram: guarda el aviso y la alerta en la app, sin enviar mensa
   assertEquals(t.actions.length, 1, 'la alerta queda en la bandeja de la app');
   void baseState;
 });
+
+Deno.test('cuerpo: texto plano de MacroDroid con remitente en la URL, y JSON de Atajos', async () => {
+  const { readIngestBody } = await import('../_shared/ingestBody.ts');
+  const plain = await readIngestBody(new Request('https://x.co/functions/v1/bank-ingest?source=sms&sender=890806', {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+    body: 'NEQUI: Pagaste 3.900,00 en "TIENDA" *X',
+  }));
+  assertEquals([plain.text, plain.sender, plain.source], ['NEQUI: Pagaste 3.900,00 en "TIENDA" *X', '890806', 'sms']);
+
+  const json = await readIngestBody(new Request('https://x.co/f', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'DaviPlata: Recibiste $30,000', source: 'sms' }),
+  }));
+  assertEquals([json.text, json.source], ['DaviPlata: Recibiste $30,000', 'sms']);
+
+  const broken = await readIngestBody(new Request('https://x.co/f', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{"text": "NEQUI: Pagaste 1.000,00 en "MALO""}',
+  }));
+  ok(String(broken.text).includes('Pagaste 1.000,00'), 'un JSON roto se procesa como texto');
+});

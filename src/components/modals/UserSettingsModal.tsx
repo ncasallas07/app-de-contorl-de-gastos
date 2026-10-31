@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../auth/authContext';
 import { TelegramSettings } from './TelegramSettings';
+import { BankIngestSettings } from './BankIngestSettings';
 
 interface Props {
   isOpen: boolean;
@@ -344,6 +345,8 @@ const SettingsForm: React.FC<Omit<Props, 'isOpen'>> = ({
         </section>
 
         <TelegramSettings />
+
+        <BankIngestSettings />
 
         <section className="settings-section settings-section-inline">
           <div className="settings-section-head">

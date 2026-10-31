@@ -23,6 +23,7 @@ import { createDraftStore } from '../_shared/draftStore.ts';
 import { createSupabaseStore } from '../_shared/supabaseStore.ts';
 import { createTelegramApi } from '../_shared/telegram.ts';
 import { todayInZone } from '../_shared/zone.ts';
+import { type IngestBody as Body, readIngestBody as readBody } from '../_shared/ingestBody.ts';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -36,27 +37,6 @@ const SOURCES: IngestSource[] = ['sms', 'correo', 'prueba'];
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-interface Body {
-  text?: unknown;
-  sender?: unknown;
-  source?: unknown;
-  userId?: unknown;
-}
-
-async function readBody(request: Request): Promise<Body> {
-  const url = new URL(request.url);
-  const raw = await request.text();
-  const fromUrl = { sender: url.searchParams.get('sender'), source: url.searchParams.get('source') };
-  if ((request.headers.get('content-type') ?? '').includes('application/json')) {
-    try {
-      return { ...fromUrl, ...JSON.parse(raw) as Body };
-    } catch {
-      // JSON roto (comillas del SMS): se usa el texto tal cual.
-    }
-  }
-  return { ...fromUrl, text: raw };
 }
 
 async function resolveUser(request: Request, body: Body, client: SupabaseClient): Promise<string | null> {

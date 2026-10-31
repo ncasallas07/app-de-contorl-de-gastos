@@ -4012,6 +4012,124 @@ body.light-theme .vt-priority {
   margin-top: 12px;
 }
 
+/* Ajustes · avisos de los bancos */
+.bk-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bk-field {
+  display: grid;
+  gap: 6px;
+}
+
+.bk-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bk-value {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  font-size: 9.5px;
+  line-height: 1.45;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  user-select: all;
+}
+
+.bk-token {
+  color: var(--accent-strong);
+  border-style: dashed;
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.bk-copy-row .vt-btn {
+  flex: none;
+  min-height: 30px;
+  gap: 5px;
+}
+
+.bk-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--warn);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.bk-warn svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.bk-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  color: var(--text-soft);
+  font-size: 9.5px;
+  line-height: 1.5;
+  background: var(--warn-bg);
+  border: 1px solid rgba(var(--warn-rgb), 0.3);
+  border-radius: 8px;
+}
+
+.bk-confirm .settings-actions,
+.bk-body > .settings-actions {
+  gap: 8px;
+}
+
+.bk-events h5 {
+  margin-bottom: 6px;
+  color: var(--muted-strong);
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.bk-events ul {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+}
+
+.bk-events li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  padding: 6px 8px;
+  font-size: 9.5px;
+  background: var(--surface-3);
+  border-radius: 7px;
+}
+
+.bk-event-main {
+  overflow: hidden;
+  color: var(--text-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bk-events li strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.bk-events li small {
+  grid-column: 2 / 4;
+  color: var(--muted);
+  font-size: 8.5px;
+}
+
 /* ===== MOBILE NAV ===== */
 
 .vt-mobile-nav {

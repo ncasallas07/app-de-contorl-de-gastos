@@ -8,6 +8,9 @@ const hasPlaceholder = (value?: string) =>
 
 export const isSupabaseConfigured = !hasPlaceholder(supabaseUrl) && !hasPlaceholder(supabaseAnonKey);
 
+/** URL del proyecto (pública), p. ej. para mostrar la dirección de las funciones. */
+export const supabaseProjectUrl = isSupabaseConfigured ? supabaseUrl!.replace(/\/$/, '') : null;
+
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: {
