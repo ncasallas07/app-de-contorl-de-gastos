@@ -286,12 +286,14 @@ quieres correr Supabase completo en tu computador.
    Los celulares se identifican con un token personal (`fs_...`) que se genera
    en la app (*Ajustes de cuenta > Avisos de los bancos*); en la base de datos
    solo se guarda su huella SHA-256. Cómo configurar MacroDroid (Android) y
-   Atajos (iPhone): [`docs/celulares.md`](../../docs/celulares.md).
+   Atajos (iPhone): [`docs/celulares.md`](../../docs/celulares.md). Los
+   correos de Nu los envía un script de Google Apps Script que corre en tu
+   Gmail: [`docs/correo.md`](../../docs/correo.md).
 
 ## Pruebas
 
 ```bash
-npm run agent:test     # 109 pruebas: las 5 capas, orquestador, bot y avisos de bancos
+npm run agent:test     # 112 pruebas: las 5 capas, orquestador, bot y avisos de bancos
 npm run agent:check    # revisión de tipos de la función
 ```
 

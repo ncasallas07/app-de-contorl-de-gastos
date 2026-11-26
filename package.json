@@ -25,7 +25,8 @@
     "secrets:scan:dir": "node scripts/secrets/scan.mjs dir",
     "secrets:scan:history": "node scripts/secrets/scan.mjs history",
     "secrets:scan:staged": "node scripts/secrets/scan.mjs staged",
-    "secrets:install-hooks": "node scripts/secrets/install-hooks.mjs"
+    "secrets:install-hooks": "node scripts/secrets/install-hooks.mjs",
+    "agent:test:gmail": "node scripts/gmail/finsmart-correos.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

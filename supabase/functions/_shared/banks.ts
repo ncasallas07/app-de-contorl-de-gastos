@@ -54,10 +54,25 @@ export function parseBankAmount(raw: string): number | null {
   return Math.round(value);
 }
 
-/** Primer monto del texto: "$93,800", "3.900,00", "COP 12.000". */
+const NUMBER = String.raw`(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)`;
+
+/**
+ * El monto del aviso. En orden: el que lleva "$" o "COP"; el que sigue a un
+ * verbo de dinero ("Pagaste 3.900,00"); el primer número. Así una fecha u hora
+ * al inicio de un correo ("25 de noviembre, 10:32") no se toma como monto.
+ */
 function firstAmount(text: string): number | null {
-  const match = /(?:\$|COP\s?)?\s?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)/i.exec(text);
-  return match ? parseBankAmount(match[1]) : null;
+  const patterns = [
+    new RegExp(String.raw`(?:\$|\bCOP)\s?` + NUMBER, 'i'),
+    new RegExp(String.raw`\b(?:pagaste|pagar|pago de|compraste|compra de|compra por|valor de|recibiste|enviaste|transferiste|retiraste)\s+` + NUMBER, 'i'),
+    new RegExp(NUMBER),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const amount = match ? parseBankAmount(match[1]) : null;
+    if (amount !== null) return amount;
+  }
+  return null;
 }
 
 /** "GOOGLE *Google One" → "Google One" · "GOPASS" → "Gopass" · "APPLE.COM/BILL" → "Apple.com/bill". */

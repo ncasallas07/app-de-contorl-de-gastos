@@ -62,3 +62,17 @@ Deno.test('la huella ignora mayúsculas y prefijos del comercio', () => {
   const b = parseBankMessage('NEQUI: Pagaste 3.900,00 en GOOGLE *GOOGLE ONE')!;
   assertEquals(fingerprint(a), fingerprint(b));
 });
+
+Deno.test('correos: fechas y horas antes del monto no se confunden con el monto', () => {
+  const nu = parseBankMessage(
+    'Asunto: Tu pago no fue aprobado\n25 de noviembre de 2026, 10:32 a. m.\nHola Nelson, Faltan fondos para pagar $7.671,00 en GOPASS. '
+      + 'Recarga tu cuenta Nu para evitar rechazos.',
+    'Nu <notificaciones@nu.com.co>',
+  );
+  assertEquals(nu, { bank: 'Nu', kind: 'rechazo', amount: 7_671, merchant: 'Gopass', title: 'Gopass' });
+
+  const compra = parseBankMessage('Asunto: Compra aprobada\n25 nov 2026\nCompraste $45.900,00 en RAPPI con tu tarjeta Nu.', 'nu.com.co');
+  assertEquals([compra?.bank, compra?.kind, compra?.amount, compra?.merchant], ['Nu', 'compra', 45_900, 'Rappi']);
+
+  assertEquals(parseBankMessage('NEQUI: Pagaste 3.900,00 en GOOGLE *Google One')?.amount, 3_900);
+});
