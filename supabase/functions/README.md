@@ -277,7 +277,8 @@ quieres correr Supabase completo en tu computador.
    | Código de seguridad | `Tu codigo es 482913` | lo descarta sin guardarlo |
 
    Si el mismo aviso llega al iPhone y al Android en menos de 10 minutos, se
-   registra una sola vez. Para probar sin celular:
+   registra una sola vez; y si un movimiento llega por SMS y por correo, también
+   (mismo banco, tipo y monto en 30 minutos). Para probar sin celular:
 
    ```sql
    select public.bank_test('tu@correo.com', 'NEQUI: Pagaste 3.900,00 en GOOGLE *Google One');
@@ -293,7 +294,7 @@ quieres correr Supabase completo en tu computador.
 ## Pruebas
 
 ```bash
-npm run agent:test     # 112 pruebas: las 5 capas, orquestador, bot y avisos de bancos
+npm run agent:test     # 113 pruebas: las 5 capas, orquestador, bot y avisos de bancos
 npm run agent:check    # revisión de tipos de la función
 ```
 

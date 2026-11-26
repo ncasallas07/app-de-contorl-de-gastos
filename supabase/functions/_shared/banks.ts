@@ -101,11 +101,19 @@ export function merchantKey(merchant: string | null): string {
 }
 
 export function detectBank(text: string, sender?: string | null): BankName {
+  // Primero el remitente: un correo de Davivienda puede mencionar DaviPlata
+  // en el pie, pero quien lo envía no deja duda.
   const from = (sender ?? '').toLowerCase();
-  if (from.includes('890806') || /^\s*nequi\b/i.test(text) || /\bnequi\b/i.test(from)) return 'Nequi';
-  if (from.includes('85888') || /daviplata/i.test(text) || from.includes('daviplata')) return 'Daviplata';
-  if (/(^|[^a-z])nu\.com\.co|nubank/i.test(from) || /\b(nu colombia|nubank|tu cuenta nu|tarjeta nu)\b/i.test(text)) return 'Nu';
-  if (from.includes('davivienda') || /davivienda/i.test(text)) return 'Davivienda';
+  if (from.includes('890806') || /\bnequi\b/.test(from)) return 'Nequi';
+  if (from.includes('85888') || from.includes('daviplata')) return 'Daviplata';
+  if (/(^|[^a-z])nu\.com\.co|nubank/.test(from)) return 'Nu';
+  if (from.includes('davivienda')) return 'Davivienda';
+
+  if (/^\s*nequi\b/i.test(text)) return 'Nequi';
+  if (/daviplata/i.test(text)) return 'Daviplata';
+  if (/\b(nu colombia|nubank|tu cuenta nu|tarjeta nu)\b/i.test(text)) return 'Nu';
+  if (/davivienda/i.test(text)) return 'Davivienda';
+  if (/\bnequi\b/i.test(text)) return 'Nequi';
   return 'Banco';
 }
 
@@ -120,7 +128,7 @@ const PURCHASE = /\b(pagaste|compraste|tu compra|compra (?:aprobada|por|de|en)|p
 
 /** Lo que viene después de " en " o " a " hasta el final de la frase. */
 function after(text: string, word: 'en' | 'a'): string | null {
-  const match = new RegExp(`\\s${word}\\s+([^\\n]+?)(?:\\.(?:\\s|$)|,\\s|\\s+con\\s+tu|\\s+por\\s+|$)`, 'i').exec(text);
+  const match = new RegExp(`\\s${word}\\s+([^\\n]+?)(?:\\.(?:\\s|$)|,\\s|\\s+(?:con|desde)\\s+(?:tu|su)\\b|\\s+el\\s+d[ií]a\\b|\\s+a\\s+las\\s|\\s+por\\s+|$)`, 'i').exec(text);
   return match ? cleanMerchant(match[1]) : null;
 }
 

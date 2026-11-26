@@ -1,8 +1,9 @@
 /**
- * FinSmart · reenvía al agente los correos de Nu (fase 2, sesión 5).
+ * FinSmart · reenvía al agente los correos de los bancos (fase 2, sesión 5):
+ * Nu, Nequi, Davivienda y Daviplata.
  *
  * Corre en Google Apps Script con TU cuenta de Gmail: no necesita dominio,
- * servidor de correo ni reenvíos. Cada 5 minutos busca correos nuevos de Nu y
+ * servidor de correo ni reenvíos. Cada 5 minutos busca correos nuevos de los bancos y
  * manda el asunto y el comienzo del texto a la función bank-ingest. Solo lee
  * los correos que coinciden con BUSQUEDA; nunca borra ni responde nada.
  *
@@ -15,8 +16,14 @@
 
 const URL_FINSMART = 'https://usqzqmudjouxkoivwfth.supabase.co/functions/v1/bank-ingest';
 
-/** Correos de Nu de los últimos 2 días. Ajusta el remitente si cambia. */
-const BUSQUEDA = '(from:nu.com.co OR from:nubank.com.co) newer_than:2d';
+/**
+ * Correos de los bancos de los últimos 2 días, sin la pestaña Promociones
+ * (publicidad). Si un banco te escribe desde otro dominio, agrégalo aquí.
+ * Si el mismo movimiento llega por SMS y por correo, FinSmart lo registra
+ * una sola vez.
+ */
+const REMITENTES = ['nu.com.co', 'nubank.com.co', 'nequi.com.co', 'davivienda.com', 'daviplata.com'];
+const BUSQUEDA = '(' + REMITENTES.map((r) => 'from:' + r).join(' OR ') + ') newer_than:2d -category:promotions';
 
 /** Cuántos ids de correos ya enviados se recuerdan (evita reenviar). */
 const MAX_RECORDADOS = 300;
@@ -29,7 +36,7 @@ function instalar() {
     .forEach((t) => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('revisarCorreos').timeBased().everyMinutes(5).create();
   revisarCorreos();
-  console.log('Listo: FinSmart revisará tus correos de Nu cada 5 minutos.');
+  console.log('Listo: FinSmart revisará los correos de tus bancos cada 5 minutos.');
 }
 
 /** Ejecútalo si quieres detener la revisión automática. */

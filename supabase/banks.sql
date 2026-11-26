@@ -43,8 +43,9 @@ create policy "bank_events_read_own"
 revoke all on public.bank_events from anon, authenticated;
 grant select on public.bank_events to authenticated;
 
--- Guarda un aviso. Devuelve su id, o null si el mismo aviso ya llegó hace
--- menos de 10 minutos (al otro celular o por SMS y correo a la vez).
+-- Guarda un aviso. Devuelve su id, o null si es repetido: el mismo aviso hace
+-- menos de 10 minutos (al otro celular), o el mismo movimiento que ya llegó
+-- por otro medio (SMS y correo) hace menos de 30 minutos.
 create or replace function public.bank_record_event(
   p_user_id uuid,
   p_bank text,
@@ -72,6 +73,21 @@ begin
     where user_id = p_user_id
       and fingerprint = p_fingerprint
       and received_at > now() - interval '10 minutes'
+  ) then
+    return null;
+  end if;
+
+  -- El mismo movimiento avisado por SMS y por correo (sesión 5): el correo
+  -- puede tardar y escribir el comercio distinto, así que se compara banco,
+  -- tipo y monto en una ventana de 30 minutos.
+  if exists (
+    select 1 from public.bank_events
+    where user_id = p_user_id
+      and bank = p_bank
+      and kind = p_kind
+      and amount = p_amount
+      and source <> p_source
+      and received_at > now() - interval '30 minutes'
   ) then
     return null;
   end if;

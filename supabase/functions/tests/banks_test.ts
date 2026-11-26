@@ -76,3 +76,14 @@ Deno.test('correos: fechas y horas antes del monto no se confunden con el monto'
 
   assertEquals(parseBankMessage('NEQUI: Pagaste 3.900,00 en GOOGLE *Google One')?.amount, 3_900);
 });
+
+Deno.test('correos de Nequi y Davivienda: el remitente decide el banco', () => {
+  const davivienda = parseBankMessage(
+    'Asunto: Notificación de compra\nDavivienda le informa una compra por $85.400 en EXITO COLINA con su tarjeta débito. Descarga DaviPlata.',
+    'Banco Davivienda <alertas@davivienda.com>',
+  );
+  assertEquals([davivienda?.bank, davivienda?.kind, davivienda?.amount], ['Davivienda', 'compra', 85_400]);
+
+  const nequi = parseBankMessage('Asunto: Hiciste un pago\nHola Nelson, pagaste $25.000,00 en DIDI FOOD desde tu Nequi.', 'Nequi <notificaciones@nequi.com.co>');
+  assertEquals([nequi?.bank, nequi?.kind, nequi?.amount, nequi?.merchant], ['Nequi', 'compra', 25_000, 'Didi Food']);
+});
